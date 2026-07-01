@@ -27,6 +27,7 @@ from core.domain.config import ChannelConfig
 from core.domain.event import Event, EventType
 from core.domain.market import MarketState
 from core.domain.symbol import Symbol
+from app.cache.memory import MemoryCache
 from core.ports.channel import Channel
 from core.ports.eventbus import BusHandler, EventBus
 from core.ports.pipline import Pipeline
@@ -35,8 +36,8 @@ from core.ports.pipline import Pipeline
 class SymbolChannel:
     """Netty 风格 Channel。只认 EventBus，不持有任何交易所连接。
 
-    持有运行时状态：market（MarketState，K线/指标/信号）、sub_account（Channel 维度子账号）。
-    handler 通过 ctx.channel.market / ctx.channel.sub_account 访问。
+    持有运行时状态：market（MarketState，K线/指标/信号）、sub_account（Channel 维度子账号）、
+    cache（订单缓存）。handler 通过 ctx.channel.* 访问。
     """
 
     def __init__(
@@ -56,6 +57,7 @@ class SymbolChannel:
         self.market_type = market_type       # "futures" / "spot"
         self.market = MarketState()          # 运行时市场状态
         self.sub_account = sub_account
+        self.cache = MemoryCache()           # Channel 维度缓存（订单等）
 
         self._activated = False
         self._subscribed: set[str] = set()

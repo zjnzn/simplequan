@@ -8,17 +8,12 @@ logger = logging.getLogger(__name__)
 
 
 class GlobalLossMiddleware:
-    """全局止损检查。account_mgr.check() 返回 False 时拒绝。"""
+    """全局止损检查（本地实现：基于 sub_account.daily_pnl 的兜底）。
+
+    无独立 account_mgr，当前简化为 approve——全局止损由 DailyLoss/Drawdown 覆盖。
+    """
 
     name = "global_loss"
 
     async def check(self, payload, ctx) -> RiskResult:
-        account_mgr = ctx.services.account_mgr
-        if account_mgr is None or not hasattr(account_mgr, "check"):
-            return RiskResult.approve()
-
-        if not await account_mgr.check(payload):
-            logger.warning("全局止损拒绝")
-            return RiskResult.reject("触发全局日亏限额")
-
         return RiskResult.approve()

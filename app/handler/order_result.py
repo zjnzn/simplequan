@@ -12,9 +12,12 @@ logger = logging.getLogger(__name__)
 
 
 class OrderResultHandler(Handler):
-    """入站：订单状态更新。只处理 ORDER_FILLED/CANCELED/REJECTED 事件。
+    """入站：订单最终状态回报。
 
-    成交时更新仓位追踪和 daily_pnl。
+    与 OrderAccepted 的乐观更新配合，达到最终一致性：
+      - ORDER_FILLED：开仓单用真实成交均价修正 pos.avg_price；平仓单算 PnL；
+        部分成交差额回滚。
+      - ORDER_CANCELED / ORDER_REJECTED：回滚乐观更新的持仓，撤回未成交部分。
     """
 
     handles = frozenset({EventType.ORDER_FILLED, EventType.ORDER_CANCELED, EventType.ORDER_REJECTED})
@@ -38,7 +41,7 @@ class OrderResultHandler(Handler):
         # 更新缓存中的订单
         if order_id:
             key = f"orders/{order_id}"
-            cached = await ctx.services.cache.get(key)
+            cached = await ctx.channel.cache.get(key)
             if cached is not None and hasattr(cached, "with_update"):
                 try:
                     order = cached.with_update(
@@ -50,64 +53,91 @@ class OrderResultHandler(Handler):
                     order = raw
             else:
                 order = _ccxt_to_order(raw) if isinstance(raw, dict) else raw
-            await ctx.services.cache.set(key, order)
+            await ctx.channel.cache.set(key, order)
 
-        # 成交时更新仓位和 PnL
-        if event.type == EventType.ORDER_FILLED and avg_price and filled_qty:
-            self._update_position_and_pnl(ctx, side, float(filled_qty), float(avg_price))
+        # 持仓最终修正 / 回滚
+        pending_key = f"orders/{order_id}/pending"
+        pending = await ctx.channel.cache.get(pending_key)
+        if pending is not None:
+            if event.type == EventType.ORDER_FILLED:
+                await self._on_filled(ctx, side, filled_qty, avg_price, pending)
+            else:
+                # CANCELED / REJECTED：未成交，全部回滚
+                await self._rollback(ctx, pending)
+            await ctx.channel.cache.delete(pending_key)
 
-        ctx.account.current_position = raw
-        logger.info("订单回报: %s %s 订单号=%s 方向=%s 成交=%s", event.symbol, event.type.value, order_id, side, filled_qty)
+        logger.info("订单回报: %s %s 订单号=%s 方向=%s 成交=%s",
+                    event.symbol, event.type.value, order_id, side, filled_qty)
         await ctx.fire_channel_read(event)
 
-    @staticmethod
-    def _update_position_and_pnl(
-        ctx: Context, side: str, qty: float, price: float
+    async def _on_filled(
+        self, ctx: Context, side: str, filled_qty: Decimal,
+        fill_avg: Decimal | None, pending: dict,
     ) -> None:
-        """更新仓位追踪和 daily_pnl，并同步到 MasterAccountManager。"""
-        acc = ctx.account
-        pnl = 0.0
-        if side == "BUY":
-            if acc.position_side == "SELL":
-                # 平空仓 → 计算 PnL
-                pnl = (acc.position_avg_price - price) * min(qty, acc.position_qty)
-                acc.daily_pnl += pnl
-                remaining = acc.position_qty - qty
-                if remaining <= 0:
-                    acc.position_side = ""
-                    acc.position_qty = 0.0
-                    acc.position_avg_price = 0.0
-                else:
-                    acc.position_qty = remaining
-            else:
-                # 开多仓或加仓
-                total_cost = acc.position_avg_price * acc.position_qty + price * qty
-                acc.position_qty += qty
-                acc.position_avg_price = total_cost / acc.position_qty if acc.position_qty else 0
-                acc.position_side = "BUY"
-        elif side == "SELL":
-            if acc.position_side == "BUY":
-                # 平多仓 → 计算 PnL
-                pnl = (price - acc.position_avg_price) * min(qty, acc.position_qty)
-                acc.daily_pnl += pnl
-                remaining = acc.position_qty - qty
-                if remaining <= 0:
-                    acc.position_side = ""
-                    acc.position_qty = 0.0
-                    acc.position_avg_price = 0.0
-                else:
-                    acc.position_qty = remaining
-            else:
-                # 开空仓或加仓
-                total_cost = acc.position_avg_price * acc.position_qty + price * qty
-                acc.position_qty += qty
-                acc.position_avg_price = total_cost / acc.position_qty if acc.position_qty else 0
-                acc.position_side = "SELL"
+        """FILLED：开仓修正均价，平仓算 PnL，部分成交差额回滚。
 
-        # 同步 PnL 变动到 MasterAccountManager 全局汇总
-        if pnl != 0.0:
-            pipeline_id = getattr(ctx.ctx, "pipeline_id", "")
-            logger.info("盈亏: %s 方向=%s 盈亏=%.4f 日累计=%.4f", pipeline_id or "?", side, pnl, acc.daily_pnl)
-            mgr = ctx.services.account_mgr
-            if mgr and pipeline_id and pipeline_id in mgr._daily_pnls:
-                mgr._daily_pnls[pipeline_id] += pnl
+        filled_qty 为实际成交量；pending["qty"] 为乐观更新量。
+        部分成交时：先回滚未成交差额（按占位价/原均价），再对已成交部分做最终修正。
+        """
+        sub = ctx.channel.sub_account
+        if sub is None or fill_avg is None:
+            return
+        pos = sub.position
+        pending_qty = pending["qty"]
+        # 实际成交量不超过 pending 量
+        settled = min(filled_qty, pending_qty)
+
+        # 部分成交：先回滚未成交差额（回滚后持仓只剩已成交部分）
+        unfilled = pending_qty - filled_qty
+        if unfilled > 0:
+            await self._rollback(ctx, pending, unfilled)
+
+        if pending["kind"] == "open":
+            # 最终一致性：用真实成交均价替换占位部分（已回滚 unfilled，pos.qty 含 settled）
+            placeholder = pending["placeholder"]
+            if pos.qty > 0 and settled > 0:
+                other_total = pos.avg_price * pos.qty - placeholder * settled
+                pos.avg_price = (other_total + fill_avg * settled) / pos.qty
+            logger.debug("开仓均价修正: 真均价=%s 成交=%s 持仓=%s 均价=%s",
+                         fill_avg, settled, pos.qty, pos.avg_price)
+        elif pending["kind"] == "close":
+            # 平仓成交，按实际成交量算真实 PnL
+            avg_at_close = pending["avg_at_close"]
+            side_at_close = pending["side_at_close"]
+            # 平多仓(BUY持仓)→(fill-avg)；平空仓(SELL持仓)→(avg-fill)
+            if side_at_close == "BUY":
+                pnl = (fill_avg - avg_at_close) * settled
+            else:
+                pnl = (avg_at_close - fill_avg) * settled
+            sub.daily_pnl += pnl
+            sub.allocated_balance += pnl
+            if pnl != 0:
+                logger.info("盈亏: %s 方向=%s 盈亏=%.4f 日累计=%.4f",
+                            ctx.channel.id[:8], side, float(pnl), float(sub.daily_pnl))
+
+    async def _rollback(self, ctx: Context, pending: dict, qty: Decimal | None = None) -> None:
+        """回滚乐观更新的持仓。qty=None 全量回滚，否则回滚指定数量（部分成交差额）。"""
+        sub = ctx.channel.sub_account
+        if sub is None:
+            return
+        pos = sub.position
+        rollback_qty = qty if qty is not None else pending["qty"]
+
+        if pending["kind"] == "open":
+            # 撤回乐观增加的 qty，重算均价（剔除占位部分）
+            placeholder = pending["placeholder"]
+            if pos.qty > 0:
+                other_total = pos.avg_price * pos.qty - placeholder * rollback_qty
+                pos.qty -= rollback_qty
+                if pos.qty > 0:
+                    pos.avg_price = other_total / pos.qty
+                else:
+                    pos.side = ""
+                    pos.avg_price = Decimal("0")
+            logger.debug("开仓回滚: 数量=%s 剩余持仓=%s", rollback_qty, pos.qty)
+        elif pending["kind"] == "close":
+            # 还原乐观减少的 qty
+            pos.qty += rollback_qty
+            if pos.side == "" and pos.qty > 0:
+                pos.side = pending["side_at_close"]
+            logger.debug("平仓回滚: 数量=%s 剩余持仓=%s", rollback_qty, pos.qty)

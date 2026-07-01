@@ -11,9 +11,9 @@ from decimal import Decimal
 from typing import Literal
 
 
-@dataclass(frozen=True)
+@dataclass
 class Position:
-    """仓位信息。"""
+    """仓位信息（可变，OrderResult 直接修改）。"""
     side: Literal["BUY", "SELL", ""] = ""
     qty: Decimal = Decimal("0")
     avg_price: Decimal = Decimal("0")
@@ -36,11 +36,12 @@ class LeverageConfig:
     margin_mode: Literal["cross", "isolated"] = "cross"
 
 
-@dataclass(frozen=True)
+@dataclass
 class SubAccount:
-    """子账号（策略/Channel）。
+    """子账号（Channel 维度，可变运行时状态）。
 
-    每个策略/Channel 绑定一个子账号，持有分配的余额和独立的仓位追踪。
+    每个 Channel 绑定一个子账号，持有分配的余额和独立的仓位追踪。
+    OrderResult 成交后直接修改 position/daily_pnl。
     """
     account_id: str
     master_id: str
@@ -49,7 +50,7 @@ class SubAccount:
     # 分配的余额
     allocated_balance: Decimal = Decimal("0")
 
-    # 仓位追踪
+    # 仓位追踪（可变）
     position: Position = field(default_factory=Position)
 
     # 日内盈亏
@@ -64,23 +65,27 @@ class SubAccount:
         qty: Decimal | None = None,
         avg_price: Decimal | None = None,
     ) -> SubAccount:
-        """更新仓位。"""
-        return replace(self, position=Position(
-            side=side if side is not None else self.position.side,
-            qty=qty if qty is not None else self.position.qty,
-            avg_price=avg_price if avg_price is not None else self.position.avg_price,
-        ))
+        """更新仓位（in-place 修改 position，返回 self 便于链式）。"""
+        if side is not None:
+            self.position.side = side
+        if qty is not None:
+            self.position.qty = qty
+        if avg_price is not None:
+            self.position.avg_price = avg_price
+        return self
 
     def with_pnl(self, pnl: Decimal) -> SubAccount:
-        """累加日内盈亏。"""
-        return replace(self, daily_pnl=self.daily_pnl + pnl)
+        """累加日内盈亏（in-place）。"""
+        self.daily_pnl += pnl
+        return self
 
     def with_leverage(self, leverage: int, margin_mode: str = "cross") -> SubAccount:
-        """更新杠杆配置。"""
-        return replace(self, leverage_config=LeverageConfig(
+        """更新杠杆配置（in-place）。"""
+        self.leverage_config = LeverageConfig(
             leverage=leverage,
             margin_mode=margin_mode,
-        ))
+        )
+        return self
 
 
 @dataclass(frozen=True)

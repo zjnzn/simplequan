@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import ABC, abstractmethod
+from decimal import Decimal
 from typing import Optional
 
 from app.cache.memory import MemoryCache
@@ -126,10 +127,12 @@ class Bootstrap:
         # 1. 创建 Channel 维度 SubAccount
         sub = None
         if self._master:
+            allocated = self._master.balance.total * Decimal(str(cfg.allocation))
             sub = SubAccount(
                 account_id=cfg.channel_id,
                 master_id=self._master.account_id,
                 symbol=symbol.symbol,
+                allocated_balance=allocated,
                 position=self._master.get_position(symbol.symbol),
                 leverage_config=self._master.get_leverage(symbol.symbol),
             )
@@ -145,8 +148,9 @@ class Bootstrap:
         # 4. initializer 往 pipeline 塞 handler
         if self._initializer:
             self._initializer.init_channel(pipeline)
-        # 5. 订阅 K 线数据流（触发 connector 的 _kline_loop）
+        # 5. 订阅数据流（kline 触发 connector 的 _kline_loop；order 订阅订单回报）
         ch.read("kline", cfg.interval)
+        ch.read("order")
         # 6. 注册
         self._channels[ch.id] = ch
         logger.info("构建 Channel: %s [%s@%s]", ch.id, symbol.symbol, cfg.interval)

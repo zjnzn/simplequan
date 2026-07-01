@@ -32,9 +32,6 @@ class PositionCalcHandler(Handler):
 
     handles = frozenset({EventType.KLINE})
 
-    def __init__(self, position_pct: float = 0.3):
-        self._position_pct = position_pct
-
     async def channel_read(self, ctx: Context, event: Event) -> None:
         signal = event.payload
         if not hasattr(signal, "value"):
@@ -56,10 +53,11 @@ class PositionCalcHandler(Handler):
         if acc is None:
             logger.warning("无子账号，跳过仓位计算")
             return
-        # 信号强度调整仓位
+        # 仓位比例 = channel 的 allocation 配置 × 信号强度
         allocated = Decimal(str(acc.allocated_balance))
-        adjusted_pct = self._position_pct * signal.strength
-        notional = allocated * Decimal(str(adjusted_pct))
+        position_pct = Decimal(str(ctx.channel.config.allocation))
+        adjusted_pct = position_pct * Decimal(str(signal.strength))
+        notional = allocated * adjusted_pct
         target_qty = notional / price  # 目标绝对数量（始终为正）
 
         # 当前持仓：正=多头，负=空头，0=空仓
@@ -100,5 +98,11 @@ class PositionCalcHandler(Handler):
         )
         await ctx.pipeline.write(Command(
             CommandType.CREATE_ORDER, target.symbol,
-            {"side": target.side, "amount": float(target.qty), "reason": target.reason},
+            {
+                "side": target.side,
+                "amount": float(target.qty),
+                "reason": target.reason,
+                # 占位价：最新 K 线 close，OrderAccepted 乐观更新持仓时用
+                "close_price": float(price),
+            },
         ))

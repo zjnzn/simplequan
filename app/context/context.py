@@ -45,6 +45,9 @@ class ChannelHandlerContext(Context):
         prev = self.prev
         while prev is not None:
             h = prev.handler
+            # 声明式过滤：handler.handles_commands 非空且指令类型不匹配时跳过；
+            # 空集 = 不过滤（透传），由 handler.write 自行决定是否继续 ctx.write。
+            # Head handler 覆盖 write 作为显式终端。
             if h.handles_commands and command.type not in h.handles_commands:
                 prev = prev.prev
             else:

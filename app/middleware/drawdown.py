@@ -16,13 +16,13 @@ class DrawdownMiddleware:
         self._default_max = max_drawdown
 
     async def check(self, payload, ctx) -> RiskResult:
-        if ctx.account.allocated_balance <= 0:
+        sub = ctx.channel.sub_account
+        if sub.allocated_balance <= 0:
             return RiskResult.approve()
 
-        risk_cfg = ctx.risk_config.get("risk_pre", {})
-        max_dd = risk_cfg.get("max_drawdown", self._default_max)
+        max_dd = ctx.channel.config.risk_pre.max_drawdown or self._default_max
 
-        drawdown = -ctx.account.daily_pnl / ctx.account.allocated_balance
+        drawdown = -sub.daily_pnl / sub.allocated_balance
         if drawdown >= max_dd:
             logger.warning("回撤拒绝: %.2f%% 限额=%.2f%%", drawdown * 100, max_dd * 100)
             return RiskResult.reject(f"回撤超限: {drawdown:.2%}, 限额={max_dd:.2%}")

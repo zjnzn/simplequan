@@ -13,23 +13,72 @@ from app.handler.position_calc import PositionCalcHandler
 from app.handler.risk_post import RiskPostCheckHandler
 from app.handler.risk_pre import RiskPreCheckHandler
 from app.handler.signal import SignalHandler
+from app.middleware.amount_check import AmountCheckMiddleware
+from app.middleware.daily_loss import DailyLossMiddleware
+from app.middleware.drawdown import DrawdownMiddleware
+from app.middleware.global_loss import GlobalLossMiddleware
+from app.middleware.max_leverage import MaxLeverageMiddleware
+from app.middleware.per_order_ratio import PerOrderRatioMiddleware
+from app.pipline.risk import RiskPipeline
+from app.indicator.registry import IndicatorLoader, IndicatorRegistry
+from app.strategy.bollinger import BollingerStrategy
+from app.strategy.ma_cross import MaCrossStrategy
+from app.strategy.registry import StrategyRegistry
+from app.strategy.rsi_macd import RsiMacdStrategy
 from bootstrap import Bootstrap, ChannelInitializer
 from core.domain.config import load_config
 from core.ports.pipline import Pipeline
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
+# 策略名 → 策略类
+_STRATEGY_MAP = {
+    "ma_cross_over": MaCrossStrategy,
+    "rsi_macd": RsiMacdStrategy,
+    "bollinger_reversal": BollingerStrategy,
+}
+
+def build_default_pre_pipeline() -> RiskPipeline:
+    """构建默认 Pre 风控管道（与原 RiskPreCheckHandler 行为一致）。"""
+    return RiskPipeline([
+        DailyLossMiddleware(),
+        DrawdownMiddleware(),
+        GlobalLossMiddleware(),
+    ])
+
+
+def build_default_post_pipeline() -> RiskPipeline:
+    """构建默认 Post 风控管道（与原 RiskPostCheckHandler 行为一致）。"""
+    return RiskPipeline([
+        AmountCheckMiddleware(),
+        MaxLeverageMiddleware(),
+        PerOrderRatioMiddleware(),
+    ])
 
 class TradingChannelInitializer(ChannelInitializer):
     """交易 Pipeline 初始化器 —— 组装 Handler 链。"""
 
     def init_channel(self, pipeline: Pipeline) -> None:
+        ch = pipeline.channel
+        strat_cfg = ch.config.strategy
+
+        # 从 config 加载策略
+        registry = StrategyRegistry()
+        strat_cls = _STRATEGY_MAP[strat_cfg.name]
+        registry.register(strat_cls(strat_cfg.params))
+
+        # 从 config 加载指标
+        ind_registry = IndicatorRegistry()
+        ind_loader = IndicatorLoader(ind_registry)
+        for ind in strat_cfg.indicators:
+            ind_loader.load_module(ind.module, ind.params)
+
         pipeline.add_last("DataParse", DataParseHandler())
-        pipeline.add_last("DataProcess", DataProcessHandler())
-        pipeline.add_last("Signal", SignalHandler())
-        pipeline.add_last("RiskPre", RiskPreCheckHandler())
+        pipeline.add_last("DataProcess", DataProcessHandler(ind_registry))
+        pipeline.add_last("Signal", SignalHandler(registry))
+        pipeline.add_last("RiskPre", RiskPreCheckHandler(build_default_pre_pipeline()))
         pipeline.add_last("PositionCalc", PositionCalcHandler())
-        pipeline.add_last("RiskPost", RiskPostCheckHandler())
+        pipeline.add_last("RiskPost", RiskPostCheckHandler(build_default_post_pipeline()))
         pipeline.add_last("OrderEncode", OrderEncodeHandler())
         pipeline.add_last("OrderAccepted", OrderAcceptedHandler())
         pipeline.add_last("OrderResult", OrderResultHandler())

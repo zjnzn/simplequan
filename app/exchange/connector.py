@@ -215,6 +215,9 @@ class ExchangeConnector:
                     symbol, payload["type"], payload["side"],
                     payload["amount"], payload.get("price"),
                 )
+                # 回填占位价（OrderAccepted 乐观更新持仓时用，不进入真实交易所）
+                if "close_price" in payload:
+                    raw["close_price"] = payload["close_price"]
                 # 记录 order_id → channel_id 映射
                 order_id = str(raw.get("id", ""))
                 if order_id:

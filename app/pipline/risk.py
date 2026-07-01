@@ -19,23 +19,6 @@ from core.ports.middleware import RiskMiddleware
 
 logger = logging.getLogger(__name__)
 
-def build_default_pre_pipeline() -> RiskPipeline:
-    """构建默认 Pre 风控管道（与原 RiskPreCheckHandler 行为一致）。"""
-    return RiskPipeline([
-        DailyLossMiddleware(),
-        DrawdownMiddleware(),
-        GlobalLossMiddleware(),
-    ])
-
-
-def build_default_post_pipeline() -> RiskPipeline:
-    """构建默认 Post 风控管道（与原 RiskPostCheckHandler 行为一致）。"""
-    return RiskPipeline([
-        AmountCheckMiddleware(),
-        MaxLeverageMiddleware(),
-        PerOrderRatioMiddleware(),
-    ])
-
 
 class RiskPipeline:
     """风控中间件责任链。"""

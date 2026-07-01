@@ -21,8 +21,8 @@ class MaxLeverageMiddleware:
         if leverage is None:
             return RiskResult.approve()
 
-        risk_cfg = ctx.risk_config.get("risk_post", {})
-        max_lev = risk_cfg.get("max_leverage", self._default_max)
+        risk_cfg = ctx.channel.config.risk_post
+        max_lev = risk_cfg.max_leverage or self._default_max
 
         if int(leverage) > int(max_lev):
             logger.warning("杠杆超限: %d > %d", int(leverage), int(max_lev))
