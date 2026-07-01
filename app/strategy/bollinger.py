@@ -1,6 +1,7 @@
 from statistics import mean, stdev
 
-from src.handlers.signal_types import Signal
+from core.domain.signal import Signal
+
 
 
 class BollingerStrategy:

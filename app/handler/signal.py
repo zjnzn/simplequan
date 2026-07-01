@@ -1,10 +1,9 @@
 import logging
 
-from src.core.context import ChannelHandlerContext
-from src.core.event_bus import ChannelEvent, EventType
-from src.core.handler import ChannelHandler
-from src.handlers.signal_types import Signal
-from src.strategies.registry import StrategyRegistry
+from core.domain.command import Command, CommandType
+from core.domain.event import Event, EventType
+from core.ports.context import Context
+from core.ports.handler import Handler
 
 # 重新导出 Signal
 __all__ = ["Signal", "SignalHandler"]
@@ -12,7 +11,7 @@ __all__ = ["Signal", "SignalHandler"]
 logger = logging.getLogger(__name__)
 
 
-class SignalHandler(ChannelHandler):
+class SignalHandler(Handler):
     """入站：策略调度器 —— 遍历 StrategyRegistry 中的策略，首个非零信号即采用。"""
 
     handles = frozenset({EventType.KLINE})
@@ -20,7 +19,7 @@ class SignalHandler(ChannelHandler):
     def __init__(self, registry: StrategyRegistry | None = None):
         self._registry = registry or StrategyRegistry()
 
-    async def channel_read(self, ctx: ChannelHandlerContext, event: ChannelEvent) -> None:
+    async def channel_read(self, ctx: Context, event: Event) -> None:
         bar = event.payload
         signal = None
 
@@ -39,4 +38,4 @@ class SignalHandler(ChannelHandler):
         ctx.market.current_signal = signal
         logger.info("信号: %s %s 强度=%.4f 原因=%s",
                      signal.direction, event.symbol, signal.strength, signal.reason)
-        await ctx.fire_channel_read(ChannelEvent(EventType.KLINE, event.symbol, signal))
+        await ctx.fire_channel_read(Event(EventType.KLINE, event.symbol, signal))

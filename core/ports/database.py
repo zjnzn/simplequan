@@ -2,7 +2,7 @@
 from typing import Protocol, runtime_checkable
 
 @runtime_checkable
-class BaseDatabase(Protocol):
+class Database(Protocol):
     async def connect(self, db_path: str) -> None:
         """建立数据库连接。"""
         ...

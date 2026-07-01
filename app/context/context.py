@@ -9,15 +9,15 @@ from core.ports.pipline import Pipeline
 class ChannelHandlerContext(Context):
     """双向链表节点。channel_read 向 next 传播，write 向 prev 传播。"""
 
-    __slots__ = ("name", "handler", "pipeline", "prev", "next")
+    __slots__ = ("name", "handler", "pipeline", "channel", "prev", "next")
 
-    def __init__(self,channel:Channel, handler: Handler, pipeline: Pipeline):
-
-        self.channel = channel
-        self.pipeline = pipeline
+    def __init__(self, name: str, handler: Handler, pipeline: Pipeline):
+        self.name = name
         self.handler = handler
-        self.prev:Context = None
-        self.next:Context = None
+        self.pipeline = pipeline
+        self.channel = pipeline.channel
+        self.prev: Context = None
+        self.next: Context = None
 
     async def fire_channel_active(self) -> None:
         """向 next 传播 channel_active。"""

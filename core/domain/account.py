@@ -1,0 +1,135 @@
+"""Account —— 账号信息领域模型。
+
+分为主账号和子账号：
+  - MasterAccount: 交易所主账号，持有总余额和子账号列表
+  - SubAccount: 子账号（策略/Channel），持有分配的余额和仓位信息
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
+from decimal import Decimal
+from typing import Literal
+
+
+@dataclass(frozen=True)
+class Position:
+    """仓位信息。"""
+    side: Literal["BUY", "SELL", ""] = ""
+    qty: Decimal = Decimal("0")
+    avg_price: Decimal = Decimal("0")
+    unrealized_pnl: Decimal = Decimal("0")
+
+
+@dataclass(frozen=True)
+class Balance:
+    """余额信息。"""
+    total: Decimal = Decimal("0")
+    free: Decimal = Decimal("0")
+    used: Decimal = Decimal("0")
+    currency: str = "USDT"
+
+
+@dataclass(frozen=True)
+class LeverageConfig:
+    """杠杆配置。"""
+    leverage: int = 1
+    margin_mode: Literal["cross", "isolated"] = "cross"
+
+
+@dataclass(frozen=True)
+class SubAccount:
+    """子账号（策略/Channel）。
+
+    每个策略/Channel 绑定一个子账号，持有分配的余额和独立的仓位追踪。
+    """
+    account_id: str
+    master_id: str
+    symbol: str
+
+    # 分配的余额
+    allocated_balance: Decimal = Decimal("0")
+
+    # 仓位追踪
+    position: Position = field(default_factory=Position)
+
+    # 日内盈亏
+    daily_pnl: Decimal = Decimal("0")
+
+    # 杠杆配置
+    leverage_config: LeverageConfig = field(default_factory=LeverageConfig)
+
+    def with_position(
+        self,
+        side: Literal["BUY", "SELL", ""] | None = None,
+        qty: Decimal | None = None,
+        avg_price: Decimal | None = None,
+    ) -> SubAccount:
+        """更新仓位。"""
+        return replace(self, position=Position(
+            side=side if side is not None else self.position.side,
+            qty=qty if qty is not None else self.position.qty,
+            avg_price=avg_price if avg_price is not None else self.position.avg_price,
+        ))
+
+    def with_pnl(self, pnl: Decimal) -> SubAccount:
+        """累加日内盈亏。"""
+        return replace(self, daily_pnl=self.daily_pnl + pnl)
+
+    def with_leverage(self, leverage: int, margin_mode: str = "cross") -> SubAccount:
+        """更新杠杆配置。"""
+        return replace(self, leverage_config=LeverageConfig(
+            leverage=leverage,
+            margin_mode=margin_mode,
+        ))
+
+
+@dataclass(frozen=True)
+class MasterAccount:
+    """主账号（交易所账号）。
+
+    持有总余额和子账号列表。
+    """
+    account_id: str
+
+    # 余额
+    balance: Balance = field(default_factory=Balance)
+
+    # 子账号列表
+    sub_accounts: tuple[SubAccount, ...] = ()
+
+    # 日内总盈亏（汇总所有子账号）
+    daily_pnl: Decimal = Decimal("0")
+
+    def get_sub_account(self, account_id: str) -> SubAccount | None:
+        """获取子账号。"""
+        for sub in self.sub_accounts:
+            if sub.account_id == account_id:
+                return sub
+        return None
+
+    def add_sub_account(self, sub: SubAccount) -> MasterAccount:
+        """添加子账号。"""
+        if self.get_sub_account(sub.account_id):
+            return self
+        return replace(self, sub_accounts=self.sub_accounts + (sub,))
+
+    def remove_sub_account(self, account_id: str) -> MasterAccount:
+        """移除子账号。"""
+        return replace(self, sub_accounts=tuple(
+            s for s in self.sub_accounts if s.account_id != account_id
+        ))
+
+    def with_balance(self, balance: Balance) -> MasterAccount:
+        """更新余额。"""
+        return replace(self, balance=balance)
+
+    def with_daily_pnl(self, pnl: Decimal) -> MasterAccount:
+        """更新日内总盈亏。"""
+        return replace(self, daily_pnl=pnl)
+
+    def update_sub_account(self, account_id: str, sub: SubAccount) -> MasterAccount:
+        """更新子账号。"""
+        return replace(self, sub_accounts=tuple(
+            sub if s.account_id == account_id else s
+            for s in self.sub_accounts
+        ))

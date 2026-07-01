@@ -3,7 +3,7 @@ import time
 from typing import Any
 
 
-class Cache:
+class MemoryCache:
     """统一扁平命名空间的内存缓存，dict + asyncio.Lock + 惰性 TTL"""
 
     def __init__(self):

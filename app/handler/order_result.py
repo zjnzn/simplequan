@@ -1,17 +1,17 @@
 import logging
 from decimal import Decimal
 
-from src.core.context import ChannelHandlerContext
-from src.core.event_bus import ChannelEvent, EventType
-from src.core.handler import ChannelHandler
-from src.core.order import OrderState
+from app.handler.order_accepted import _STATUS_MAP, _ccxt_to_order
+from core.domain.event import Event, EventType
+from core.domain.order import OrderState
+from core.ports.context import Context
+from core.ports.handler import Handler
 
-from src.handlers.order_accepted import _ccxt_to_order, _STATUS_MAP
 
 logger = logging.getLogger(__name__)
 
 
-class OrderResultHandler(ChannelHandler):
+class OrderResultHandler(Handler):
     """入站：订单状态更新。只处理 ORDER_FILLED/CANCELED/REJECTED 事件。
 
     成交时更新仓位追踪和 daily_pnl。
@@ -19,7 +19,7 @@ class OrderResultHandler(ChannelHandler):
 
     handles = frozenset({EventType.ORDER_FILLED, EventType.ORDER_CANCELED, EventType.ORDER_REJECTED})
 
-    async def channel_read(self, ctx: ChannelHandlerContext, event: ChannelEvent) -> None:
+    async def channel_read(self, ctx: Context, event: Event) -> None:
         raw = event.payload
         if isinstance(raw, dict):
             order_id = str(raw.get("id", ""))
@@ -62,7 +62,7 @@ class OrderResultHandler(ChannelHandler):
 
     @staticmethod
     def _update_position_and_pnl(
-        ctx: ChannelHandlerContext, side: str, qty: float, price: float
+        ctx: Context, side: str, qty: float, price: float
     ) -> None:
         """更新仓位追踪和 daily_pnl，并同步到 MasterAccountManager。"""
         acc = ctx.account

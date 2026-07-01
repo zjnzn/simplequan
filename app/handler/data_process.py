@@ -1,16 +1,16 @@
 import logging
 from collections import deque
-from decimal import Decimal
 
-from src.core.context import ChannelHandlerContext
-from src.core.event_bus import ChannelEvent, EventType
-from src.core.handler import ChannelHandler
-from src.indicators.registry import IndicatorRegistry
+from app.indicator.registry import IndicatorRegistry
+from core.domain.event import Event, EventType
+from core.ports.context import Context
+from core.ports.handler import Handler
+
 
 logger = logging.getLogger(__name__)
 
 
-class DataProcessHandler(ChannelHandler):
+class DataProcessHandler(Handler):
     """入站：Bar → 委托给 IndicatorRegistry 计算指标，存入 ctx.market。只处理 KLINE 事件。"""
 
     handles = frozenset({EventType.KLINE})
@@ -19,7 +19,7 @@ class DataProcessHandler(ChannelHandler):
         # indicators 参数保留向后兼容（旧测试/调用方），但不再使用
         self._registry = registry or IndicatorRegistry()
 
-    async def channel_read(self, ctx: ChannelHandlerContext, event: ChannelEvent) -> None:
+    async def channel_read(self, ctx: Context, event: Event) -> None:
         bar = event.payload
         interval = bar.interval
         if interval not in ctx.market.bars or ctx.market.bars[interval] is None:

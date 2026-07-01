@@ -3,9 +3,9 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from src.core.context import ChannelHandlerContext
-from src.core.event_bus import ChannelEvent, EventType
-from src.core.handler import ChannelHandler
+from core.domain.event import Event, EventType
+from core.ports.context import Context
+from core.ports.handler import Handler
 
 logger = logging.getLogger(__name__)
 
@@ -22,18 +22,18 @@ class Bar:
     timestamp: int
 
 
-class DataParseHandler(ChannelHandler):
+class DataParseHandler(Handler):
     """入站：ccxt OHLCV → Bar dataclass。只处理 KLINE 事件。"""
 
     handles = frozenset({EventType.KLINE})
 
-    async def channel_read(self, ctx: ChannelHandlerContext, event: ChannelEvent) -> None:
+    async def channel_read(self, ctx: Context, event: Event) -> None:
         bar = self._parse_ohlcv(event.payload, event.symbol)
         if bar is None:
             logger.debug("解析失败: symbol=%s payload类型=%s", event.symbol, type(event.payload).__name__)
             return
         logger.debug("解析K线: %s %s 收盘=%s 成交量=%s", bar.symbol, bar.interval, bar.close, bar.volume)
-        await ctx.fire_channel_read(ChannelEvent(EventType.KLINE, event.symbol, bar))
+        await ctx.fire_channel_read(Event(EventType.KLINE, event.symbol, bar))
 
     def _parse_ohlcv(self, raw: Any, symbol: str) -> Bar | None:
         """解析 ccxt watch_ohlcv 返回的 OHLCV 格式。

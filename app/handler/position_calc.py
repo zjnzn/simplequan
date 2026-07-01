@@ -2,9 +2,11 @@ import logging
 from dataclasses import dataclass
 from decimal import Decimal
 
-from src.core.context import ChannelHandlerContext
-from src.core.event_bus import ChannelCommand, ChannelEvent, CommandType, EventType
-from src.core.handler import ChannelHandler
+
+from core.domain.command import Command, CommandType
+from core.domain.event import Event, EventType
+from core.ports.context import Context
+from core.ports.handler import Handler
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +19,7 @@ class TargetPosition:
     reason: str
 
 
-class PositionCalcHandler(ChannelHandler):
+class PositionCalcHandler(Handler):
     """入站：Signal → 目标仓位差值 → 下单。
 
     信号强度驱动仓位大小：
@@ -33,7 +35,7 @@ class PositionCalcHandler(ChannelHandler):
     def __init__(self, position_pct: float = 0.3):
         self._position_pct = position_pct
 
-    async def channel_read(self, ctx: ChannelHandlerContext, event: ChannelEvent) -> None:
+    async def channel_read(self, ctx: Context, event: Event) -> None:
         signal = event.payload
         if not hasattr(signal, "value"):
             await ctx.fire_channel_read(event)
@@ -90,7 +92,7 @@ class PositionCalcHandler(ChannelHandler):
             target.side, target.symbol, float(target.qty),
             target_signed, current_qty, signal.value, target.reason,
         )
-        await ctx.pipeline.write(ChannelCommand(
+        await ctx.pipeline.write(Command(
             CommandType.CREATE_ORDER, target.symbol,
             {"side": target.side, "amount": float(target.qty), "reason": target.reason},
         ))

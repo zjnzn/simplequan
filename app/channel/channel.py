@@ -18,76 +18,76 @@ Topic 协议：
 from __future__ import annotations
 
 import asyncio
-from dataclasses import field
 import uuid
-from typing import Any, Optional
+from typing import Any
 
+from core.domain.account import SubAccount
 from core.domain.command import Command, CommandType
 from core.domain.event import Event, EventType
 from core.domain.symbol import Symbol
 from core.ports.channel import Channel
-from core.ports.eventbus import EventBus
+from core.ports.eventbus import BusHandler, EventBus
 from core.ports.pipline import Pipeline
 from utils.config import Config
+
 
 class SymbolChannel:
     """Netty 风格 Channel。只认 EventBus，不持有任何交易所连接。"""
 
-    # 账户状态
-    allocated_balance: float = 0.0
-    current_position: Any = None
-    daily_pnl: float = 0.0
-    position_side: str = ""
-    position_qty: float = 0.0
-    position_avg_price: float = 0.0
-    leverage: int = 1
-    margin_mode: str = "cross"
-    symbol: Symbol = field(default_factory=Symbol)
-    
-
-
-    def __init__(self, bus: EventBus,config: Config,pipeline:Pipeline):
+    def __init__(
+        self,
+        bus: EventBus,
+        config: Config,
+        pipeline: Pipeline,
+        symbol: Symbol,
+        market: str,
+        sub_account: SubAccount | None = None,
+    ):
         self.id = str(uuid.uuid4())
         self.config = config
         self.pipeline = pipeline
-
+        self.symbol = symbol
         self._bus = bus
+        self.market = market
+        self.sub_account = sub_account
+
         self._activated = False
-        self._subscribed = None
+        self._subscribed: set[str] = set()
 
     # ---------------- 入站：订阅 EventBus 上的 data topic ----------------
     # ExchangeConnector 已将数据包装为 ChannelEvent，Channel 只转发
 
+    def read(self, feed: str, timeframe: str = "") -> Channel:
+        """订阅数据流。feed: kline / orderbook / trade / order"""
+        topic = ""
+        event_type = EventType.KLINE
+        request = ""
 
-    def read(self,pay:str, timeframe: str) -> Channel:
-        topic:str = ""
-        eventType = ""
-        request:str = ""
-        if pay is "kline":
+        if feed == "kline":
             topic = f"{self.market}/kline/{self.symbol}@{timeframe}"
             request = f"request/{self.market}/{self.symbol}/kline-{timeframe}"
-            eventType = EventType.KLINE
-        elif pay is "orderbook":
+            event_type = EventType.KLINE
+        elif feed == "orderbook":
             topic = f"{self.market}/orderbook/{self.symbol}"
             request = f"request/{self.market}/{self.symbol}/orderbook"
-            eventType = EventType.ORDERBOOK
-        elif pay is "trade":
-            topic = f"{self.market}/trade/{self.symbol}@{timeframe}"
+            event_type = EventType.ORDERBOOK
+        elif feed == "trade":
+            topic = f"{self.market}/trade/{self.symbol}"
             request = f"request/{self.market}/{self.symbol}/trade"
-            eventType = EventType.TRADE
-        elif pay is "order":
+            event_type = EventType.TRADE
+        elif feed == "order":
             topic = f"{self.market}/order/{self.symbol}/{self.id}/*"
             request = f"request/{self.market}/{self.symbol}/order"
-            eventType = EventType.TRADE
+            event_type = EventType.ORDER_CREATED
 
         async def listener(_t: str, payload: Any) -> None:
             if isinstance(payload, Event):
                 await self.pipeline.fire_channel_read(payload)
             else:
                 await self.pipeline.fire_channel_read(
-                    Event(eventType, self.symbol, payload)
+                    Event(event_type, self.symbol, payload)
                 )
-                
+
         self._subscribe(topic, listener, request)
         return self
 
@@ -117,17 +117,6 @@ class SymbolChannel:
     async def write(self, command: Command) -> None:
         await self._publish_command(command)
 
-    async def create_order(
-        self, side: str, amount: float, price: Optional[float] = None, type: str = "limit"
-    ) -> None:
-        await self.write(Command(
-            CommandType.CREATE_ORDER, self.symbol,
-            {"side": side, "amount": amount, "price": price, "type": type},
-        ))
-
-    async def cancel_order(self, order_id: str) -> None:
-        await self.write(Command(CommandType.CANCEL_ORDER, self.symbol, {"order_id": order_id}))
-
     async def _publish_command(self, command: Command) -> None:
         """指令穿过整条 pipeline、到达 head 之后，发布到 EventBus。"""
         topic = f"command/{self.market}/{self.symbol}/{command.type.value}/{self.id}"
@@ -138,4 +127,5 @@ class SymbolChannel:
     async def close(self) -> None:
         for pattern in self._subscribed:
             await self._bus.emit(f"unsubscribe/{self.market}/{self.symbol}", {"pattern": pattern})
+        self._subscribed.clear()
 

@@ -12,6 +12,8 @@ from enum import Enum
 from fnmatch import fnmatch
 from typing import Any, Awaitable, Callable
 
+from core.ports.eventbus import EventBus
+
 logger = logging.getLogger(__name__)
 
 BusHandler = Callable[[str, Any], Awaitable[None]]
@@ -20,7 +22,7 @@ BusHandler = Callable[[str, Any], Awaitable[None]]
 # ============================================================
 # EventBus —— 异步发布/订阅总线
 # ============================================================
-class EventBus:
+class ChannelEventBus(EventBus):
     """异步发布/订阅总线，topic 支持 * 通配符（fnmatch 风格）。"""
 
     def __init__(self) -> None:

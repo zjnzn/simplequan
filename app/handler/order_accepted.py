@@ -1,10 +1,11 @@
 import logging
 from decimal import Decimal
 
-from src.core.context import ChannelHandlerContext
-from src.core.event_bus import ChannelEvent, EventType
-from src.core.handler import ChannelHandler
-from src.core.order import Order, OrderState
+
+from core.domain.event import Event, EventType
+from core.domain.order import Order, OrderState
+from core.ports.context import Context
+from core.ports.handler import Handler
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +38,12 @@ def _ccxt_to_order(raw: dict, pipeline_id: str = "") -> Order:
     )
 
 
-class OrderAcceptedHandler(ChannelHandler):
+class OrderAcceptedHandler(Handler):
     """入站：订单创建成功后缓存。只处理 ORDER_CREATED 事件。"""
 
     handles = frozenset({EventType.ORDER_CREATED})
 
-    async def channel_read(self, ctx: ChannelHandlerContext, event: ChannelEvent) -> None:
+    async def channel_read(self, ctx: Context, event: Event) -> None:
         raw = event.payload
         if isinstance(raw, dict):
             order = _ccxt_to_order(raw, pipeline_id=getattr(ctx.pipeline, "id", ""))
@@ -51,4 +52,4 @@ class OrderAcceptedHandler(ChannelHandler):
         key = f"orders/{getattr(order, 'order_id', id(order))}"
         await ctx.services.cache.set(key, order)
         logger.info("订单创建: %s %s 订单号=%s", event.symbol, event.type.value, getattr(order, 'order_id', '?'))
-        await ctx.fire_channel_read(ChannelEvent(EventType.ORDER_CREATED, event.symbol, order))
+        await ctx.fire_channel_read(Event(EventType.ORDER_CREATED, event.symbol, order))
