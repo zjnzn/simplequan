@@ -43,25 +43,31 @@ class PositionCalcHandler(Handler):
         if signal.value == 0:
             return
 
-        bar_key = "1m" if "1m" in (ctx.market.bars or {}) else next(iter(ctx.market.bars or {}), None)
+        market = ctx.channel.market
+        bar_key = "1m" if "1m" in market.bars else next(iter(market.bars), None)
         if bar_key is None:
             return
-        bars = ctx.market.bars.get(bar_key)
+        bars = market.bars.get(bar_key)
         if bars is None or len(bars) == 0:
             return
         price = bars[-1].close
 
-        acc = ctx.account
+        acc = ctx.channel.sub_account
+        if acc is None:
+            logger.warning("无子账号，跳过仓位计算")
+            return
         # 信号强度调整仓位
+        allocated = Decimal(str(acc.allocated_balance))
         adjusted_pct = self._position_pct * signal.strength
-        notional = Decimal(str(acc.allocated_balance)) * Decimal(str(adjusted_pct))
+        notional = allocated * Decimal(str(adjusted_pct))
         target_qty = notional / price  # 目标绝对数量（始终为正）
 
         # 当前持仓：正=多头，负=空头，0=空仓
-        if acc.position_side == "BUY":
-            current_qty = Decimal(str(acc.position_qty))
-        elif acc.position_side == "SELL":
-            current_qty = -Decimal(str(acc.position_qty))
+        pos = acc.position
+        if pos.side == "BUY":
+            current_qty = Decimal(str(pos.qty))
+        elif pos.side == "SELL":
+            current_qty = -Decimal(str(pos.qty))
         else:
             current_qty = Decimal("0")
 
@@ -82,7 +88,7 @@ class PositionCalcHandler(Handler):
         order_qty = abs(delta)
 
         target = TargetPosition(
-            symbol=ctx.pipeline.channel.symbol,
+            symbol=ctx.channel.symbol.symbol,
             side=order_side,
             qty=order_qty,
             reason=signal.reason,

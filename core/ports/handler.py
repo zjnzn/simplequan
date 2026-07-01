@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from core.domain.command import Command
 from core.domain.event import Event
-from core.ports.context import Context
+
+if TYPE_CHECKING:
+    from core.ports.context import Context
 
 
 class Handler:

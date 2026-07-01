@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from src.risk.base import RiskResult
+from core.domain.risk import RiskResult
 
 logger = logging.getLogger(__name__)
 

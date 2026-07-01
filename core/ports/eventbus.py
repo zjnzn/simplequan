@@ -9,7 +9,7 @@ BusHandler = Callable[[str, Any], Awaitable[None]]
 # EventBus —— 异步发布/订阅总线
 # ============================================================
 @runtime_checkable
-class EventBus:
+class EventBus(Protocol):
 
     def on(self, topic_pattern: str, handler: BusHandler) -> None:...
 

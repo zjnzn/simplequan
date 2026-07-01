@@ -1,4 +1,4 @@
-from src.handlers.signal_types import Signal
+from core.domain.signal import Signal
 
 
 class RsiMacdStrategy:
@@ -14,7 +14,7 @@ class RsiMacdStrategy:
         self.rsi_overbought = p.get("rsi_overbought", 70)
 
     async def on_bar(self, bar, ctx) -> Signal | None:
-        indicators = ctx.market.indicators.get(bar.interval, {})
+        indicators = ctx.channel.market.indicators.get(bar.interval, {})
         rsi = indicators.get("rsi_14")
         if rsi is None:
             return None

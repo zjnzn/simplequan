@@ -2,8 +2,10 @@
 
 每个 symbol 一个实例。通过 EventBus 订阅数据、发布指令。
 """
-from core.domain.command import Command
 from __future__ import annotations
+
+from core.domain.command import Command
+
 
 class Channel:
     """Netty 风格 Channel。只认 EventBus，不持有任何交易所连接。"""

@@ -16,11 +16,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
-from src.core.event_bus import ChannelEvent, EventBus, EventType
-from src.core.symbol_info import SymbolInfo
+from app.eventbus.eventbus import ChannelEventBus
+from core.domain.account import (
+    Balance,
+    LeverageConfig,
+    MasterAccount,
+    Position,
+)
+from core.domain.event import Event, EventType
+from core.domain.symbol import Symbol
 from core.ports.exchange import ExchangePort
 
 
@@ -67,7 +75,7 @@ class ExchangeConnector:
     所有数据 emit 均包装为 ChannelEvent，Channel 只转发不解析。
     """
 
-    def __init__(self, exchange: ExchangePort, bus: EventBus) -> None:
+    def __init__(self, exchange: ExchangePort, bus: ChannelEventBus) -> None:
         self._exchange = exchange
         self._bus = bus
         self._readers: dict[str, asyncio.Task] = {}
@@ -77,97 +85,9 @@ class ExchangeConnector:
         self._bus.on("request/*", self._on_request)
         self._bus.on("command/*", self._on_command)
         self._bus.on("unsubscribe/*", self._on_unsubscribe)
-        # 账户同步命令
-        self._bus.on("command/sync_account", self._on_sync_account)
-        self._bus.on("command/sync_markets", self._on_sync_markets)
-
-    # ============================================================
-    # 账户同步命令处理
-    # ============================================================
-
-    async def _on_sync_account(self, topic: str, payload: dict) -> None:
-        """同步余额/持仓/杠杆配置。payload: {"symbols": [...]}"""
-        symbols = payload.get("symbols", [])
-        if not symbols:
-            logger.warning("sync_account: no symbols provided")
-            return
-
-        # 余额
-        try:
-            bal = await self._exchange.fetch_balance()
-            usdt = bal.get("USDT", {})
-            await self._bus.emit("account/balance", {
-                "total": usdt.get("total", 0.0),
-                "free": usdt.get("free", 0.0),
-                "used": usdt.get("used", 0.0),
-                "currency": "USDT",
-            })
-        except Exception as exc:
-            logger.warning(f"sync_account balance failed: {exc}")
-
-        # 持仓 + 杠杆
-        for symbol in symbols:
-            try:
-                positions = await self._exchange.fetch_positions([symbol])
-                for pos in positions:
-                    sym = pos.get("symbol", symbol)
-                    await self._bus.emit(f"account/position/{sym}", {
-                        "symbol": sym,
-                        "side": pos.get("side", ""),
-                        "qty": pos.get("contracts", pos.get("qty", 0.0)),
-                        "avg_price": pos.get("entryPrice", pos.get("avg_price", 0.0)),
-                        "unrealized_pnl": pos.get("unrealizedPnl", 0.0),
-                    })
-            except Exception as exc:
-                logger.warning(f"sync_account position {symbol} failed: {exc}")
-
-            try:
-                cfg = await self._exchange.fetch_leverage(symbol)
-                await self._bus.emit(f"account/config/{symbol}", {
-                    "leverage": cfg.get("leverage", 1),
-                    "margin_mode": cfg.get("marginMode", cfg.get("margin_mode", "cross")),
-                })
-            except Exception as exc:
-                logger.warning(f"sync_account config {symbol} failed: {exc}")
-
-    async def _on_sync_markets(self, topic: str, payload: dict) -> None:
-        """同步市场信息。payload: {"symbols": [...], "market": "spot"}"""
-        symbols = payload.get("symbols", [])
-        market = payload.get("market", "spot")
-        if not symbols:
-            logger.warning("sync_markets: no symbols provided")
-            return
-
-        try:
-            all_markets = await self._exchange.load_markets()
-        except Exception as exc:
-            logger.warning(f"sync_markets load_markets failed: {exc}")
-            return
-
-        for symbol in symbols:
-            market_data = all_markets.get(symbol)
-            if not market_data:
-                logger.warning(f"sync_markets: {symbol} not found in load_markets result")
-                continue
-            try:
-                info = SymbolInfo.from_ccxt(market_data, market=market)
-                await self._bus.emit(f"market/info/{symbol}", {
-                    "symbol": info.symbol,
-                    "market": info.market,
-                    "amount_precision": info.amount_precision,
-                    "price_precision": info.price_precision,
-                    "min_amount": info.min_amount,
-                    "max_amount": info.max_amount,
-                    "min_cost": info.min_cost,
-                    "min_price": info.min_price,
-                    "maker_fee": info.maker_fee,
-                    "taker_fee": info.taker_fee,
-                    "contract_size": info.contract_size,
-                    "settle": info.settle,
-                    "is_linear": info.is_linear,
-                })
-            except Exception as exc:
-                logger.warning(f"sync_markets emit {symbol} failed: {exc}")
+        # 全局查询命令（无 symbol/channel_id，不套 4 段格式）
+        self._bus.on("command/fetch_account", self._on_fetch_account)
+        self._bus.on("command/fetch_symbol", self._on_fetch_symbol)
 
     # ============================================================
     # request 处理
@@ -207,7 +127,7 @@ class ExchangeConnector:
         while True:
             try:
                 ohlcv = await self._exchange.watch_ohlcv(symbol, timeframe)
-                event = ChannelEvent(EventType.KLINE, symbol, {"timeframe": timeframe, "ohlcv": ohlcv})
+                event = Event(EventType.KLINE, symbol, {"timeframe": timeframe, "ohlcv": ohlcv})
                 await self._bus.emit(topic, event)
             except asyncio.CancelledError:
                 raise
@@ -225,7 +145,7 @@ class ExchangeConnector:
         while True:
             try:
                 data = await watch_fn(*args)
-                event = ChannelEvent(event_type, symbol, data)
+                event = Event(event_type, symbol, data)
                 await self._bus.emit(topic, event)
             except asyncio.CancelledError:
                 raise
@@ -245,7 +165,7 @@ class ExchangeConnector:
                     event_name = self._order_event_name(raw.get("status", "open"))
                     event_type = _ORDER_STATUS_MAP.get(raw.get("status", "open"), EventType.ORDER_CREATED)
                     channel_id = self._order_channel.get(order_id, "")
-                    event = ChannelEvent(event_type, symbol, raw)
+                    event = Event(event_type, symbol, raw)
                     if channel_id:
                         topic = f"{market}/order/{symbol}/{channel_id}/{event_name}"
                     else:
@@ -283,6 +203,9 @@ class ExchangeConnector:
     # ============================================================
 
     async def _on_command(self, topic: str, payload: dict) -> None:
+        # 跳过全局查询命令（由专门的 handler 处理，避免 _parse_command_topic 解析失败）
+        if topic in ("command/fetch_account", "command/fetch_symbol"):
+            return
         market, symbol, cmd_type, channel_id = _parse_command_topic(topic)
         sym_compact = symbol.replace("/", "")
         error_topic = f"{market}/error/{sym_compact}/order"
@@ -297,18 +220,94 @@ class ExchangeConnector:
                 if order_id:
                     self._order_channel[order_id] = channel_id
                 # 立即回报 created 事件（带 channel_id），包装为 ChannelEvent
-                event = ChannelEvent(EventType.ORDER_CREATED, symbol, raw)
+                event = Event(EventType.ORDER_CREATED, symbol, raw)
                 await self._bus.emit(f"{market}/order/{symbol}/{channel_id}/created", event)
             elif cmd_type == "cancel_order":
                 raw = await self._exchange.cancel_order(payload["order_id"], symbol)
-                event = ChannelEvent(EventType.ORDER_CANCELED, symbol, raw)
+                event = Event(EventType.ORDER_CANCELED, symbol, raw)
                 await self._bus.emit(f"{market}/order/{symbol}/{channel_id}/canceled", event)
         except Exception as exc:
             await self._bus.emit(error_topic, str(exc))
 
     # ============================================================
-    # unsubscribe / 生命周期
+    # 全局查询命令：拉取 Symbol / MasterAccount 领域对象
     # ============================================================
+
+    async def _on_fetch_symbol(self, topic: str, payload: dict) -> None:
+        """拉取单个 symbol 的市场信息，构建 Symbol 对象后回报。
+
+        payload: {"symbol": "BTC/USDT", "market": "futures", "interval": "1m"}
+        回报 topic: market/symbol/{symbol}@{interval}
+        """
+        symbol = payload["symbol"]
+        market = payload.get("market", "spot")
+        interval = payload.get("interval", "")
+        try:
+            markets = await self._exchange.load_markets()
+            md = markets.get(symbol)
+            if not md:
+                await self._bus.emit(f"market/symbol/{symbol}@{interval}", None)
+                return
+            sym = Symbol.from_ccxt(md, market=market)
+            await self._bus.emit(f"market/symbol/{symbol}@{interval}", sym)
+        except Exception as exc:
+            await self._bus.emit(
+                f"market/error/{symbol.replace('/', '')}/fetch_symbol", str(exc)
+            )
+
+    async def _on_fetch_account(self, topic: str, payload: dict) -> None:
+        """拉取主账号整体（balance + 全部 positions + 全部 leverage），组装 MasterAccount 后回报。
+
+        payload: {"symbols": ["BTC/USDT", ...], "account_id": "master"}
+        回报 topic: account/master
+        symbols 仅用于过滤关心的持仓和逐 symbol 拉杠杆，不切分 SubAccount。
+        """
+        symbols = payload.get("symbols", [])
+        account_id = payload.get("account_id", "master")
+        try:
+            # 1. balance → Balance
+            bal = await self._exchange.fetch_balance()
+            usdt = bal.get("USDT", {})
+            balance = Balance(
+                total=Decimal(str(usdt.get("total", 0))),
+                free=Decimal(str(usdt.get("free", 0))),
+                used=Decimal(str(usdt.get("used", 0))),
+                currency="USDT",
+            )
+            # 2. 一次拉全部持仓（账号整体，不按 symbol 循环）
+            raw_positions = await self._exchange.fetch_positions(symbols)
+            positions: dict[str, Position] = {}
+            for p in raw_positions:
+                sym = p.get("symbol", "")
+                if not sym:
+                    continue
+                qty = p.get("contracts", p.get("qty", 0))
+                avg = p.get("entryPrice", p.get("avg_price", 0))
+                upnl = p.get("unrealizedPnl", p.get("unrealized_pnl", 0))
+                positions[sym] = Position(
+                    side=p.get("side", "").upper(),
+                    qty=Decimal(str(qty or 0)),
+                    avg_price=Decimal(str(avg or 0)),
+                    unrealized_pnl=Decimal(str(upnl or 0)),
+                )
+            # 3. 逐 symbol 拉杠杆（leverage 是 per-symbol 设置）
+            leverages: dict[str, LeverageConfig] = {}
+            for s in symbols:
+                lev = await self._exchange.fetch_leverage(s)
+                leverages[s] = LeverageConfig(
+                    leverage=int(lev.get("leverage", 1) or 1),
+                    margin_mode=lev.get("marginMode", lev.get("margin_mode", "cross")),
+                )
+            # 4. 组装 MasterAccount（不在此建 SubAccount，由 Channel 创建时分配）
+            master = MasterAccount(
+                account_id=account_id,
+                balance=balance,
+                positions=positions,
+                leverages=leverages,
+            )
+            await self._bus.emit("account/master", master)
+        except Exception as exc:
+            await self._bus.emit("account/error", str(exc))
 
     async def _on_unsubscribe(self, topic: str, payload: dict) -> None:
         rest = topic[len("unsubscribe/"):]

@@ -17,7 +17,7 @@ class BollingerStrategy:
         self.std_mult = p.get("std_mult", 2.0)
 
     async def on_bar(self, bar, ctx) -> Signal | None:
-        bars = ctx.market.bars.get(bar.interval)
+        bars = ctx.channel.market.bars.get(bar.interval)
         if bars is None or len(bars) < self.period:
             return None
         closes = [float(b.close) for b in list(bars)[-self.period:]]

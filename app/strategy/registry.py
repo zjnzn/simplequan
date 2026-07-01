@@ -1,3 +1,4 @@
+"""Strategy —— 策略注册表和加载器。"""
 from __future__ import annotations
 
 import importlib
@@ -6,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from src.strategies.base import Strategy
+from core.ports.strategy import Strategy
 
 log = logging.getLogger(__name__)
 
@@ -17,25 +18,27 @@ class StrategyRegistry:
     def __init__(self) -> None:
         self._plugins: dict[str, Strategy] = {}
 
-    def register(self, strategy: Strategy) -> None:
-        if not isinstance(strategy, Strategy):
-            raise TypeError(
-                f"{type(strategy).__name__} 未实现 Strategy 协议"
-            )
-        if strategy.name in self._plugins:
-            log.warning("覆盖已有策略: %s", strategy.name)
-        self._plugins[strategy.name] = strategy
-        log.info("注册策略: %s v%s", strategy.name, strategy.version)
+    def register(self, plugin: Strategy) -> None:
+        """注册策略。"""
+        if not isinstance(plugin, Strategy):
+            raise TypeError(f"{type(plugin).__name__} 未实现 Strategy 协议")
+        if plugin.name in self._plugins:
+            log.warning("覆盖已有策略: %s", plugin.name)
+        self._plugins[plugin.name] = plugin
+        log.info("注册策略: %s v%s", plugin.name, plugin.version)
 
     def get(self, name: str) -> Strategy:
+        """获取策略，不存在时抛出 KeyError。"""
         if name not in self._plugins:
             raise KeyError(f"策略 '{name}' 未注册，已注册: {list(self._plugins)}")
         return self._plugins[name]
 
     def all(self) -> list[Strategy]:
+        """获取所有已注册策略。"""
         return list(self._plugins.values())
 
     def has(self, name: str) -> bool:
+        """检查策略是否已注册。"""
         return name in self._plugins
 
     def collect_required_indicators(self) -> set[str]:
@@ -46,17 +49,18 @@ class StrategyRegistry:
         return result
 
     def __len__(self) -> int:
+        """返回已注册策略数量。"""
         return len(self._plugins)
 
 
 class StrategyLoader:
-    """从模块路径或文件路径动态加载策略。"""
+    """策略加载器。"""
 
     def __init__(self, registry: StrategyRegistry) -> None:
         self._registry = registry
 
-    def load_module(self, dotted_path: str,
-                    params: dict[str, Any] | None = None) -> Strategy:
+    def load_module(self, dotted_path: str, params: dict[str, Any] | None = None) -> Strategy:
+        """从 Python 模块路径加载并实例化策略。"""
         module_path, cls_name = dotted_path.rsplit(".", 1)
         try:
             module = importlib.import_module(module_path)
@@ -71,8 +75,8 @@ class StrategyLoader:
         self._registry.register(strategy)
         return strategy
 
-    def load_file(self, spec: str,
-                  params: dict[str, Any] | None = None) -> Strategy:
+    def load_file(self, spec: str, params: dict[str, Any] | None = None) -> Strategy:
+        """从文件路径加载策略。"""
         if "::" not in spec:
             raise ValueError(f"格式错误，需要 'path.py::ClassName'，得到: {spec}")
 
@@ -94,6 +98,7 @@ class StrategyLoader:
         return strategy
 
     def load_all(self, configs: list[dict[str, Any]]) -> None:
+        """从配置列表批量加载策略。"""
         for cfg in configs:
             params = cfg.get("params", {})
             if "module" in cfg:

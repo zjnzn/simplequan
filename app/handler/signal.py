@@ -1,7 +1,9 @@
 import logging
 
+from app.strategy.registry import StrategyRegistry
 from core.domain.command import Command, CommandType
 from core.domain.event import Event, EventType
+from core.domain.signal import Signal
 from core.ports.context import Context
 from core.ports.handler import Handler
 
@@ -35,7 +37,7 @@ class SignalHandler(Handler):
         if signal is None:
             signal = Signal(0.0, "NO_SIGNAL")
 
-        ctx.market.current_signal = signal
+        ctx.channel.market.current_signal = signal
         logger.info("信号: %s %s 强度=%.4f 原因=%s",
                      signal.direction, event.symbol, signal.strength, signal.reason)
         await ctx.fire_channel_read(Event(EventType.KLINE, event.symbol, signal))

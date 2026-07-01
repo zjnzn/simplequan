@@ -1,4 +1,6 @@
 
+from __future__ import annotations
+
 from typing import Protocol, runtime_checkable
 
 from core.domain.command import Command
@@ -6,7 +8,7 @@ from core.domain.event import Event
 from core.ports.channel import Channel
 from core.ports.context import Context
 from core.ports.handler import Handler
-from __future__ import annotations
+
 """Pipeline —— Netty 风格双向链表。
 
 入站事件（channel_read）从 Head → Tail 传播，

@@ -1,4 +1,4 @@
-from src.handlers.signal_types import Signal
+from core.domain.signal import Signal
 
 
 class MaCrossStrategy:
@@ -14,7 +14,7 @@ class MaCrossStrategy:
         self.slow = p.get("slow", 20)
 
     async def on_bar(self, bar, ctx) -> Signal | None:
-        indicators = ctx.market.indicators.get(bar.interval, {})
+        indicators = ctx.channel.market.indicators.get(bar.interval, {})
         ma_fast = indicators.get(f"ma_{self.fast}")
         ma_slow = indicators.get(f"ma_{self.slow}")
         if ma_fast is None or ma_slow is None:

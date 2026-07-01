@@ -16,23 +16,22 @@ class DataProcessHandler(Handler):
     handles = frozenset({EventType.KLINE})
 
     def __init__(self, registry: IndicatorRegistry | None = None):
-        # indicators 参数保留向后兼容（旧测试/调用方），但不再使用
         self._registry = registry or IndicatorRegistry()
 
     async def channel_read(self, ctx: Context, event: Event) -> None:
         bar = event.payload
         interval = bar.interval
-        if interval not in ctx.market.bars or ctx.market.bars[interval] is None:
-            ctx.market.bars[interval] = deque(maxlen=500)
-        ctx.market.bars[interval].append(bar)
+        market = ctx.channel.market
+        bars = market.ensure_bars(interval)
+        bars.append(bar)
 
         result = {}
         for calc in self._registry.all():
             try:
-                result.update(calc.compute(ctx.market.bars[interval]))
+                result.update(calc.compute(bars))
             except Exception:
                 logger.warning("指标计算器 %s 异常，跳过", calc.name, exc_info=True)
 
-        ctx.market.indicators[interval] = result
-        logger.debug("指标计算 %s[%s]: %s", bar.symbol, interval, ctx.market.indicators[interval])
+        market.indicators[interval] = result
+        logger.debug("指标计算 %s[%s]: %s", bar.symbol, interval, result)
         await ctx.fire_channel_read(event)

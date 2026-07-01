@@ -5,13 +5,15 @@
 """
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from core.domain.command import Command
 from core.domain.event import Event
-from core.ports.channel import Channel
-from core.ports.handler import Handler
-from core.ports.pipline import Pipeline
+
+if TYPE_CHECKING:
+    from core.ports.channel import Channel
+    from core.ports.handler import Handler
+    from core.ports.pipline import Pipeline
 
 
 @runtime_checkable

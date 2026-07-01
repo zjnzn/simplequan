@@ -54,16 +54,16 @@ class ChannelPipeline:
         return self
 
     async def fire_channel_active(self) -> None:
-        await self._head.fire_channel_active(self._head)
+        await self._head.fire_channel_active()
 
     async def fire_channel_read(self, event: Event) -> None:
-        await self._head.fire_channel_read(self._head, event)
+        await self._head.fire_channel_read(event)
 
     async def write(self, command: Command) -> None:
-        await self._tail.write(self._tail, command)
+        await self._tail.write(command)
 
     async def fire_exception_caught(self, exc: Exception) -> None:
-        await self._head.fire_exception_caught(self._head, exc)
+        await self._head.fire_exception_caught(exc)
 
 
 

@@ -1,5 +1,6 @@
 import logging
 
+from app.pipline.risk import RiskPipeline
 from core.domain.command import Command, CommandType
 from core.domain.event import Event, EventType
 from core.ports.context import Context

@@ -87,18 +87,32 @@ class SubAccount:
 class MasterAccount:
     """主账号（交易所账号）。
 
-    持有总余额和子账号列表。
+    持有总余额、按 symbol 索引的持仓与杠杆快照、以及 Channel 维度的子账号列表。
     """
     account_id: str
 
     # 余额
     balance: Balance = field(default_factory=Balance)
 
-    # 子账号列表
+    # 按 symbol 索引的持仓（账号整体持仓快照）
+    positions: dict[str, Position] = field(default_factory=dict)
+
+    # 按 symbol 索引的杠杆配置
+    leverages: dict[str, LeverageConfig] = field(default_factory=dict)
+
+    # 子账号列表（Channel 维度，symbol@timeframe 一个，由 Bootstrap 创建时 add）
     sub_accounts: tuple[SubAccount, ...] = ()
 
     # 日内总盈亏（汇总所有子账号）
     daily_pnl: Decimal = Decimal("0")
+
+    def get_position(self, symbol: str) -> Position:
+        """获取某 symbol 的持仓，无则返回空 Position。"""
+        return self.positions.get(symbol, Position())
+
+    def get_leverage(self, symbol: str) -> LeverageConfig:
+        """获取某 symbol 的杠杆配置，无则返回默认。"""
+        return self.leverages.get(symbol, LeverageConfig())
 
     def get_sub_account(self, account_id: str) -> SubAccount | None:
         """获取子账号。"""
@@ -122,6 +136,14 @@ class MasterAccount:
     def with_balance(self, balance: Balance) -> MasterAccount:
         """更新余额。"""
         return replace(self, balance=balance)
+
+    def with_positions(self, positions: dict[str, Position]) -> MasterAccount:
+        """更新持仓快照。"""
+        return replace(self, positions=positions)
+
+    def with_leverages(self, leverages: dict[str, LeverageConfig]) -> MasterAccount:
+        """更新杠杆配置。"""
+        return replace(self, leverages=leverages)
 
     def with_daily_pnl(self, pnl: Decimal) -> MasterAccount:
         """更新日内总盈亏。"""
