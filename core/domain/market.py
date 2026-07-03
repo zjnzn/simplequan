@@ -28,7 +28,7 @@ class MarketState:
     def get_bars(self, interval: str) -> deque | None:
         return self.bars.get(interval)
 
-    def ensure_bars(self, interval: str, maxlen: int = 500) -> deque:
+    def ensure_bars(self, interval: str, maxlen: int = 1000) -> deque:
         """获取指定周期的 bar 序列，不存在则创建。"""
         dq = self.bars.get(interval)
         if dq is None:

@@ -89,7 +89,7 @@ channel:
       1h:
         strategy:
           name: adx_trend
-          params: { period: 14, threshold: 25 }
+          params: { period: 14 }
           indicators:
             - name: adx
               params: { period: 14 }
@@ -103,7 +103,7 @@ channel:
       5m:
         strategy:
           name: rsi_macd
-          params: { period: 14, oversold: 30, overbought: 70 }
+          params: { period: 14 }
           indicators:
             - name: rsi
               params: { period: 14 }
@@ -112,7 +112,7 @@ channel:
       15m:
         strategy:
           name: stoch
-          params: { k_period: 14, d_period: 3, overbought: 80, oversold: 20 }
+          params: { k_period: 14, d_period: 3 }
           indicators:
             - name: stoch
               params: { k_period: 14, d_period: 3 }

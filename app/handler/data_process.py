@@ -14,12 +14,16 @@ class DataProcessHandler(Handler):
 
     无状态模板模式：注册表缓存指标类对象，handler 从 ctx.channel.config 取
     indicator 配置，调用时注入 params，默认值由指标类内 params.get(k, 默认) 兜底。
+
+    性能优化：计算器实例按 name 缓存，避免逐 bar 重复实例化。
     """
 
     handles = frozenset({EventType.KLINE})
 
     def __init__(self, registry: IndicatorRegistry | None = None) -> None:
         self._registry = registry or IndicatorRegistry()
+        # 缓存已实例化的计算器，避免逐 bar 重复创建
+        self._calc_cache: dict[str, object] = {}
 
     async def channel_read(self, ctx: Context, event: Event) -> None:
         bar = event.payload
@@ -30,9 +34,14 @@ class DataProcessHandler(Handler):
 
         result = {}
         for ind_cfg in ctx.channel.config.strategy.indicators:
+            cache_key = f"{ind_cfg.name}:{sorted(ind_cfg.params.items())}"
             try:
-                calc_cls = self._registry.get(ind_cfg.name)
-                result.update(calc_cls().compute(bars, ind_cfg.params))
+                calc = self._calc_cache.get(cache_key)
+                if calc is None:
+                    calc_cls = self._registry.get(ind_cfg.name)
+                    calc = calc_cls()
+                    self._calc_cache[cache_key] = calc
+                result.update(calc.compute(bars, ind_cfg.params))
             except KeyError:
                 logger.warning("指标 '%s' 未在 indicators 注册表中声明，跳过", ind_cfg.name)
             except Exception:

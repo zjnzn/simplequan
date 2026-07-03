@@ -21,6 +21,8 @@ class Collector:
         self._bootstrap = bootstrap
         self._bus = bus
         self._records: dict[str, ChannelRecord] = {}
+        # 跟踪每个 channel 已同步到前端的最新 bar timestamp，避免重复
+        self._synced_ts: dict[str, int] = {}
 
     def bind(self) -> None:
         """订阅 bus topic。"""
@@ -44,7 +46,7 @@ class Collector:
         pass
 
     async def _on_kline(self, topic: str, payload: Any) -> None:
-        """kline 到达 → 快照 indicators + current_signal 存历史。
+        """kline 到达 → 全量同步 market.bars + 快照 indicators/signal 存历史。
 
         topic: {market}/kline/{symbol}@{interval}
         payload: Event(KLINE, symbol, Bar) 或 Event(KLINE, symbol, {timeframe, ohlcv})
@@ -60,16 +62,25 @@ class Collector:
         interval = ch.config.interval
         rec = self.get_or_create(channel_id, symbol, interval)
 
-        # 取最新 bar（已 append 到 market.bars）
+        # 全量同步 market.bars 中尚未同步到前端的新 bar
         bars = ch.market.bars.get(interval)
-        if bars and len(bars) > 0:
+        if bars:
+            last_synced = self._synced_ts.get(channel_id, 0)
+            for bar in bars:
+                if bar.timestamp > last_synced:
+                    rec.klines.append(bar)
+                    last_synced = bar.timestamp
+            self._synced_ts[channel_id] = last_synced
+
+            # 取最新 bar 用于指标/信号时间戳
             bar = list(bars)[-1]
-            rec.klines.append(bar)
+        else:
+            bar = None
 
         # 快照当前指标
         inds = ch.market.indicators.get(interval, {})
         rec.indicators.append({
-            "timestamp": getattr(bar, "timestamp", 0) if bars else 0,
+            "timestamp": getattr(bar, "timestamp", 0) if bar else 0,
             "indicators": {k: str(v) for k, v in inds.items()},
         })
 
@@ -77,7 +88,7 @@ class Collector:
         sig = ch.market.current_signal
         if sig is not None:
             rec.signals.append({
-                "timestamp": getattr(bar, "timestamp", 0) if bars else 0,
+                "timestamp": getattr(bar, "timestamp", 0) if bar else 0,
                 "direction": sig.direction,
                 "strength": sig.strength,
                 "value": sig.value,

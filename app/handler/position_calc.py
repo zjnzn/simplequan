@@ -22,12 +22,10 @@ class TargetPosition:
 class PositionCalcHandler(Handler):
     """入站：Signal → 目标仓位差值 → 下单。
 
+    单一职责：仅做仓位计算，不做信号过滤（过滤交由 Risk 层）。
     信号强度驱动仓位大小：
     - LONG (value > 0)：目标 = +position_pct * strength * balance
     - SHORT (value < 0)：目标 = -position_pct * strength * balance
-    - HOLD (value == 0)：不下单
-
-    差值 = 目标 - 当前持仓。差值为正→买入，为负→卖出，接近零→跳过。
     """
 
     handles = frozenset({EventType.KLINE})
@@ -53,14 +51,14 @@ class PositionCalcHandler(Handler):
         if acc is None:
             logger.warning("无子账号，跳过仓位计算")
             return
-        # 仓位比例 = channel 的 allocation 配置 × 信号强度
+
         allocated = Decimal(str(acc.allocated_balance))
         position_pct = Decimal(str(ctx.channel.config.allocation))
         adjusted_pct = position_pct * Decimal(str(signal.strength))
         notional = allocated * adjusted_pct
-        target_qty = notional / price  # 目标绝对数量（始终为正）
+        target_qty = notional / price
 
-        # 当前持仓：正=多头，负=空头，0=空仓
+        # 当前持仓
         pos = acc.position
         if pos.side == "BUY":
             current_qty = Decimal(str(pos.qty))
@@ -69,40 +67,22 @@ class PositionCalcHandler(Handler):
         else:
             current_qty = Decimal("0")
 
-        # 信号方向 → 目标持仓（正=多，负=空）
-        if signal.value > 0:
-            target_signed = target_qty
-        else:
-            target_signed = -target_qty
+        # 目标持仓（正=多，负=空）
+        target_signed = target_qty if signal.value > 0 else -target_qty
 
-        # 差值 = 目标 - 当前
         delta = target_signed - current_qty
         if abs(delta) < Decimal("0.000001"):
-            logger.debug("仓位差值过小，跳过: 目标=%s 当前=%s 差值=%s", target_signed, current_qty, delta)
             return
 
-        # 转换为下单指令
         order_side = "BUY" if delta > 0 else "SELL"
         order_qty = abs(delta)
 
-        target = TargetPosition(
-            symbol=ctx.channel.symbol.symbol,
-            side=order_side,
-            qty=order_qty,
-            reason=signal.reason,
-        )
-        logger.debug(
-            "仓位计算: %s %s 数量=%.6f 目标=%s 当前=%s 信号=%+.4f 原因=%s",
-            target.side, target.symbol, float(target.qty),
-            target_signed, current_qty, signal.value, target.reason,
-        )
         await ctx.pipeline.write(Command(
-            CommandType.CREATE_ORDER, target.symbol,
+            CommandType.CREATE_ORDER, ctx.channel.symbol.symbol,
             {
-                "side": target.side,
-                "amount": float(target.qty),
-                "reason": target.reason,
-                # 占位价：最新 K 线 close，OrderAccepted 乐观更新持仓时用
+                "side": order_side,
+                "amount": float(order_qty),
+                "reason": signal.reason,
                 "close_price": float(price),
             },
         ))

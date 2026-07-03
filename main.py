@@ -19,6 +19,7 @@ from app.middleware.daily_loss import DailyLossMiddleware
 from app.middleware.drawdown import DrawdownMiddleware
 from app.middleware.max_leverage import MaxLeverageMiddleware
 from app.middleware.per_order_ratio import PerOrderRatioMiddleware
+from app.middleware.signal_strength import SignalStrengthMiddleware
 from app.pipline.risk import RiskPipeline
 from app.indicator.registry import IndicatorLoader, IndicatorRegistry
 from app.strategy.registry import StrategyLoader, StrategyRegistry
@@ -33,6 +34,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 def build_default_pre_pipeline() -> RiskPipeline:
     """构建默认 Pre 风控管道。"""
     return RiskPipeline([
+        SignalStrengthMiddleware(min_strength=0.03),
         DailyLossMiddleware(),
         DrawdownMiddleware(),
     ])

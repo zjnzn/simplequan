@@ -1,7 +1,7 @@
-"""SuperTrend 趋势跟随策略（对齐 project_refactored SuperTrendStrategy）。
+"""SuperTrend 连续置信度策略。
 
-方向翻转给出最强信号 ±1.0；方向延续给出 ±0.6。
-无强度过滤，信号过滤交由风控层处理。
+信号 = direction * clamp(|close - supertrend| / (close * sensitivity), 0, 1)
+价格距超趋势线越远，趋势置信度越高；接近趋势线时置信度趋近 0。
 """
 from __future__ import annotations
 
@@ -9,42 +9,35 @@ from core.domain.signal import Signal
 
 
 class SupertrendStrategy:
-    """SuperTrend 趋势跟随策略。
+    """SuperTrend 置信度策略。
 
     params:
-        period:     ATR 周期，默认 10
-        multiplier: 乘数，默认 3.0
+        period:      ATR 周期，默认 10
+        multiplier:  乘数，默认 3.0
+        sensitivity: 归一化系数，默认 0.01
     """
 
     name = "supertrend"
-    version = "1.0.0"
-
-    def __init__(self) -> None:
-        self._prev_direction: float | None = None
+    version = "2.0.0"
 
     def required_indicators(self, params: dict) -> list[str]:
         return ["supertrend", "supertrend_direction"]
 
     async def on_bar(self, bar, ctx, params: dict) -> Signal | None:
+        sensitivity = params.get("sensitivity", 0.01)
         indicators = ctx.channel.market.indicators.get(bar.interval, {})
+        st = indicators.get("supertrend")
         direction = indicators.get("supertrend_direction")
-        if direction is None:
+        if st is None or direction is None:
             return None
 
         d = float(direction)
         if d == 0:
-            return Signal(0.0, "NO_SIGNAL")
+            return Signal(0.0, "ST_DIR_0")
 
-        if self._prev_direction is None:
-            self._prev_direction = d
-            return Signal(0.0, "INIT")
-
-        pd = self._prev_direction
-        self._prev_direction = d
-
-        # 方向翻转检测
-        flip = d != pd and pd != 0
-
-        if d == 1:
-            return Signal(1.0 if flip else 0.6, "SUPERTREND_LONG")
-        return Signal(-1.0 if flip else -0.6, "SUPERTREND_SHORT")
+        price = float(bar.close)
+        # 价格距超趋势线的偏离程度
+        deviation = abs(price - float(st)) / (price * sensitivity)
+        strength = min(1.0, deviation)
+        value = d * strength
+        return Signal(value, f"ST_DIST_{strength:.2f}")

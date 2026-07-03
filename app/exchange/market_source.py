@@ -56,12 +56,18 @@ class MarketSource:
         self._closed = False
 
     async def watch_ohlcv(self, symbol: str, timeframe: str) -> list:
-        """轮询 K 线，仅在出现新 K 线时返回。"""
+        """轮询 K 线，仅在出现新 K 线时返回。
+
+        首次拉取使用大 limit 做历史数据预热，后续用小 limit 增量拉取。
+        """
         key = f"{symbol}@{timeframe}"
         while not self._closed:
+            # 首次拉取：预热历史数据（limit=500）；后续：增量轮询（limit=2）
+            is_first = key not in self._last_ohlcv_ts
+            limit = 500 if is_first else 2
             try:
                 ohlcv = await asyncio.to_thread(
-                    self._exchange.fetch_ohlcv, symbol, timeframe, limit=2
+                    self._exchange.fetch_ohlcv, symbol, timeframe, limit=limit
                 )
             except Exception as exc:
                 logger.warning("fetch_ohlcv 失败 %s: %s", key, exc)
@@ -75,6 +81,7 @@ class MarketSource:
                 prev_ts = self._last_ohlcv_ts.get(key, 0)
                 if ts != prev_ts:
                     self._last_ohlcv_ts[key] = ts
+                    logger.info("K线数据 %s: 首次=%s 获取 %d 根", key, is_first, len(ohlcv))
                     return ohlcv
             # 无新 K 线，等待 timeframe 周期的一部分再轮询
             await asyncio.sleep(self._poll_interval(timeframe))

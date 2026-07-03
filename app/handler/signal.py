@@ -17,12 +17,15 @@ class SignalHandler(Handler):
 
     无状态模板模式：注册表缓存策略类对象，handler 调用时注入 channel 的 params，
     默认值由策略类内 params.get(k, 默认) 兜底。
+
+    实例缓存：策略实例按 channel_id 缓存，保证 _prev_* 状态跨 bar 持续。
     """
 
     handles = frozenset({EventType.KLINE})
 
     def __init__(self, registry: StrategyRegistry | None = None) -> None:
         self._registry = registry or StrategyRegistry()
+        self._strat_cache: dict[str, object] = {}
 
     async def channel_read(self, ctx: Context, event: Event) -> None:
         bar = event.payload
@@ -30,8 +33,13 @@ class SignalHandler(Handler):
         signal = None
 
         try:
-            strat_cls = self._registry.get(strat_cfg.name)
-            result = await strat_cls().on_bar(bar, ctx, strat_cfg.params)
+            cache_key = ctx.channel.config.channel_id
+            strat = self._strat_cache.get(cache_key)
+            if strat is None:
+                strat_cls = self._registry.get(strat_cfg.name)
+                strat = strat_cls()
+                self._strat_cache[cache_key] = strat
+            result = await strat.on_bar(bar, ctx, strat_cfg.params)
             if result and result.value != 0:
                 signal = result
         except KeyError:
