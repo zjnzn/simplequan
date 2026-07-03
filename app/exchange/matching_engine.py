@@ -33,6 +33,8 @@ class MatchingEngine:
         }
         # symbol → 持仓（合约多空）
         self._positions: dict[str, dict] = {}
+        # symbol → 杠杆倍数
+        self._leverages: dict[str, int] = {}
 
         # 订单簿：order_id → raw
         self._orders: dict[str, dict] = {}
@@ -118,7 +120,7 @@ class MatchingEngine:
         raw["status"] = "closed"
         self._pending.pop(raw["id"], None)
         self._apply_position(raw["symbol"], raw["side"], fill_qty, fill_price)
-        self._apply_balance(raw["side"], fill_qty, fill_price)
+        self._apply_balance(raw["symbol"], raw["side"], fill_qty, fill_price)
         await self._push_order(raw["symbol"], raw)
         logger.info(
             "虚拟成交: %s %s %s @%s",
@@ -147,15 +149,17 @@ class MatchingEngine:
             pos["side"] = "buy" if new_qty_signed > 0 else "sell"
             pos["qty"] = abs(new_qty_signed)
 
-    def _apply_balance(self, side: str, qty: float, price: float) -> None:
-        """更新余额（简化：扣减/增加可用，不计保证金占用细节）。"""
+    def _apply_balance(self, symbol: str, side: str, qty: float, price: float) -> None:
+        """更新余额（杠杆感知：占用保证金 = notional / leverage）。"""
         usdt = self._balance["USDT"]
         cost = qty * price
+        leverage = self._leverages.get(symbol, 1)
+        margin = cost / leverage if leverage > 0 else cost
         if side == "buy":
-            usdt["free"] -= cost
-            usdt["used"] += cost
+            usdt["free"] -= margin
+            usdt["used"] += margin
         else:
-            usdt["free"] += cost
+            usdt["free"] += margin
         usdt["total"] = usdt["free"] + usdt["used"]
 
     async def _push_order(self, symbol: str, raw: dict) -> None:
@@ -198,7 +202,7 @@ class MatchingEngine:
         return {"info": {}, "USDT": usdt}
 
     async def fetch_positions(self, symbols: list[str]) -> list[dict]:
-        """返回 ccxt 风格持仓列表，unrealized_pnl 用最新价实时算。"""
+        """返回 ccxt 风格持仓列表，unrealized_pnl 用最新价实时算（含杠杆）。"""
         result = []
         for sym in symbols:
             pos = self._positions.get(sym)
@@ -208,7 +212,8 @@ class MatchingEngine:
             upnl = 0.0
             if last:
                 sign = 1.0 if pos["side"] == "buy" else -1.0
-                upnl = sign * (last - pos["avg_price"]) * pos["qty"]
+                leverage = self._leverages.get(sym, 1)
+                upnl = sign * (last - pos["avg_price"]) * pos["qty"] * leverage
             result.append({
                 "symbol": sym,
                 "side": pos["side"],
@@ -218,8 +223,13 @@ class MatchingEngine:
             })
         return result
 
+    def set_leverage(self, symbol: str, leverage: int, margin_mode: str = "cross") -> None:
+        """设置逐 symbol 杠杆倍数。"""
+        self._leverages[symbol] = leverage
+
     async def fetch_leverage(self, symbol: str) -> dict:
-        return {"leverage": 1, "marginMode": "cross"}
+        lev = self._leverages.get(symbol, 1)
+        return {"leverage": lev, "marginMode": "cross"}
 
     # ============================================================
     # 生命周期

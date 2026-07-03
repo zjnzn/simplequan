@@ -21,15 +21,18 @@ class PerOrderRatioMiddleware:
             return RiskResult.approve()
 
         command_payload = payload.payload if hasattr(payload, "payload") else {}
-        amount = float(command_payload.get("amount", 0))
-        price = float(command_payload.get("price", 0))
+        notional = float(command_payload.get("notional", 0))
 
-        if price <= 0:
+        if notional <= 0:
             return RiskResult.approve()
 
-        ratio = amount * price / sub.allocated_balance
+        ratio = notional / float(sub.allocated_balance)
 
-        max_ratio = ctx.channel.config.risk_post.max_per_order_ratio or self._default_max
+        max_ratio = ctx.channel.config.risk_post.max_per_order_ratio
+        if max_ratio is None:
+            max_ratio = self._default_max
+        elif max_ratio <= 0:
+            return RiskResult.approve()
 
         if ratio > max_ratio:
             logger.warning("单笔占比超限: %.2f%% > %.2f%%", ratio * 100, max_ratio * 100)

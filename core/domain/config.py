@@ -44,21 +44,21 @@ class StrategyConfig:
 
 @dataclass(frozen=True, slots=True)
 class RiskConfig:
-    """风控参数。"""
-    daily_loss_limit: float = 0.0
-    max_drawdown: float = 0.0
-    max_per_order_ratio: float = 0.0
-    max_leverage: float = 1.0
+    """风控参数。None=未配置（中间件使用自身默认值），0=显式禁用检查。"""
+    daily_loss_limit: float | None = None
+    max_drawdown: float | None = None
+    max_per_order_ratio: float | None = None
+    max_leverage: float | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any] | None) -> RiskConfig:
         if not d:
             return cls()
         return cls(
-            daily_loss_limit=d.get("daily_loss_limit", 0.0),
-            max_drawdown=d.get("max_drawdown", 0.0),
-            max_per_order_ratio=d.get("max_per_order_ratio", 0.0),
-            max_leverage=d.get("max_leverage", 1.0),
+            daily_loss_limit=d.get("daily_loss_limit"),
+            max_drawdown=d.get("max_drawdown"),
+            max_per_order_ratio=d.get("max_per_order_ratio"),
+            max_leverage=d.get("max_leverage"),
         )
 
 

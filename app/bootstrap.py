@@ -144,6 +144,7 @@ class Bootstrap:
                 leverage_config=self._master.get_leverage(symbol.symbol),
             )
             self._master = self._master.add_sub_account(sub)
+            await self._cache.set("account/master", self._master)
         # 2. 先建 channel（pipeline=None 占位）
         ch = SymbolChannel(
             self._bus, cfg, symbol, cfg.market,

@@ -22,7 +22,11 @@ class MaxLeverageMiddleware:
             return RiskResult.approve()
 
         risk_cfg = ctx.channel.config.risk_post
-        max_lev = risk_cfg.max_leverage or self._default_max
+        max_lev = risk_cfg.max_leverage
+        if max_lev is None:
+            max_lev = self._default_max
+        elif max_lev <= 0:
+            return RiskResult.approve()
 
         if int(leverage) > int(max_lev):
             logger.warning("杠杆超限: %d > %d", int(leverage), int(max_lev))

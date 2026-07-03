@@ -52,10 +52,15 @@ class PositionCalcHandler(Handler):
             logger.warning("无子账号，跳过仓位计算")
             return
 
+        # 每根 K 线到达时更新未实现盈亏
+        pos = acc.position
+        pos.update_unrealized_pnl(Decimal(str(price)))
+
         allocated = Decimal(str(acc.allocated_balance))
         position_pct = Decimal(str(ctx.channel.config.allocation))
         adjusted_pct = position_pct * Decimal(str(signal.strength))
-        notional = allocated * adjusted_pct
+        leverage = Decimal(str(getattr(acc.leverage_config, "leverage", 1) or 1))
+        notional = allocated * adjusted_pct * leverage
         target_qty = notional / price
 
         # 当前持仓
@@ -76,12 +81,17 @@ class PositionCalcHandler(Handler):
 
         order_side = "BUY" if delta > 0 else "SELL"
         order_qty = abs(delta)
+        order_notional = order_qty * Decimal(str(price))
+        margin = order_notional / leverage if leverage > 0 else order_notional
 
         await ctx.pipeline.write(Command(
             CommandType.CREATE_ORDER, ctx.channel.symbol.symbol,
             {
                 "side": order_side,
                 "amount": float(order_qty),
+                "notional": float(order_notional),
+                "leverage": int(leverage),
+                "margin": float(margin),
                 "reason": signal.reason,
                 "close_price": float(price),
             },

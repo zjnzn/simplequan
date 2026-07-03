@@ -7,6 +7,7 @@ handler 内部事件（信号/指标）走 pipeline fire_channel_read 不上 bus
 from __future__ import annotations
 
 import logging
+from collections import deque
 from typing import Any
 
 from app.monitor.store import ChannelRecord
@@ -23,6 +24,8 @@ class Collector:
         self._records: dict[str, ChannelRecord] = {}
         # 跟踪每个 channel 已同步到前端的最新 bar timestamp，避免重复
         self._synced_ts: dict[str, int] = {}
+        # master 账户历史快照（有界 200）
+        self.master_history: deque[dict[str, Any]] = deque(maxlen=200)
 
     def bind(self) -> None:
         """订阅 bus topic。"""
@@ -42,8 +45,17 @@ class Collector:
         return rec
 
     async def _on_master(self, topic: str, master: Any) -> None:
-        """master 由 bootstrap 持有，此处无需额外存储。"""
-        pass
+        """记录 master 历史快照，用于监控面板回溯。"""
+        import time
+        snap = {
+            "ts": int(time.time()),
+            "account_id": getattr(master, "account_id", ""),
+            "balance_total": float(master.balance.total) if hasattr(master, "balance") else 0.0,
+            "balance_free": float(master.balance.free) if hasattr(master, "balance") else 0.0,
+            "balance_used": float(master.balance.used) if hasattr(master, "balance") else 0.0,
+            "subs_count": len(getattr(master, "sub_accounts", ())),
+        }
+        self.master_history.append(snap)
 
     async def _on_kline(self, topic: str, payload: Any) -> None:
         """kline 到达 → 全量同步 market.bars + 快照 indicators/signal 存历史。

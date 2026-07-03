@@ -61,13 +61,16 @@ class OrderAcceptedHandler(Handler):
         sub = ctx.channel.sub_account
         if sub is not None and order.qty and order.qty > 0:
             placeholder = Decimal(str(raw.get("close_price", 0))) or None
-            await self._optimistic_apply(ctx, order, placeholder)
+            leverage = sub.leverage_config.leverage
+            margin = Decimal(str(raw.get("margin", 0)))
+            await self._optimistic_apply(ctx, order, placeholder, leverage, margin)
 
         logger.debug("订单创建: %s %s 订单号=%s", event.symbol, event.type.value, order.order_id)
         await ctx.fire_channel_read(Event(EventType.ORDER_CREATED, event.symbol, order))
 
     async def _optimistic_apply(
-        self, ctx: Context, order: Order, placeholder: Decimal | None
+        self, ctx: Context, order: Order, placeholder: Decimal | None,
+        leverage: int = 1, margin: Decimal = Decimal("0"),
     ) -> None:
         """下单即乐观更新持仓，pending 写入 cache 供 OrderResult 修正/回滚。"""
         pos = ctx.channel.sub_account.position
@@ -77,37 +80,44 @@ class OrderAcceptedHandler(Handler):
         pending_key = f"orders/{oid}/pending"
 
         if placeholder is None or placeholder <= 0:
-            logger.warning("订单 %s 无占位价，乐观更新跳过均价计算", oid)
-            return
+            placeholder = Decimal("0")
+            logger.warning("订单 %s 无占位价，乐观更新使用 0 占位（FILLED 时纠正）", oid)
 
         if side == pos.side or pos.side == "":
             # 同向开仓 / 加仓（含空仓建仓）
-            await self._apply_open(ctx, pos, side, qty, placeholder, pending_key, oid)
+            await self._apply_open(ctx, pos, side, qty, placeholder, pending_key, oid, leverage, margin)
         else:
             # 反向 → 平仓
-            await self._apply_close(ctx, pos, side, qty, pending_key, oid)
+            await self._apply_close(ctx, pos, side, qty, pending_key, oid, leverage)
 
     async def _apply_open(
         self, ctx: Context, pos, side: str, qty: Decimal,
         placeholder: Decimal, pending_key: str, oid: str,
+        leverage: int = 1, margin: Decimal = Decimal("0"),
     ) -> None:
         """开仓/加仓：qty 即时增，avg_price 占位加权。"""
         total = pos.avg_price * pos.qty + placeholder * qty
         pos.qty += qty
         pos.avg_price = total / pos.qty if pos.qty else Decimal("0")
         pos.side = side
+        # 占用保证金：杠杆 > 1 时按 notional/leverage 计算
+        if margin > 0:
+            ctx.channel.sub_account.margin_used += margin
         # pending: 开仓待确认（FILLED 时用真实均价替换占位部分）
         await ctx.channel.cache.set(pending_key, {
             "kind": "open",
             "qty": qty,
             "placeholder": placeholder,
+            "leverage": leverage,
+            "margin": margin,
         })
-        logger.debug("乐观开仓 %s %s 数量=%s 占价=%s 持仓=%s 均价=%s",
-                     oid, side, qty, placeholder, pos.qty, pos.avg_price)
+        logger.debug("乐观开仓 %s %s 数量=%s 占价=%s 杠杆=%s 保证金=%s 持仓=%s 均价=%s",
+                     oid, side, qty, placeholder, leverage, margin, pos.qty, pos.avg_price)
 
     async def _apply_close(
         self, ctx: Context, pos, side: str, qty: Decimal,
         pending_key: str, oid: str,
+        leverage: int = 1,
     ) -> None:
         """平仓：qty 即时减，记录平仓前的均价/方向供 FILLED 算 PnL。"""
         close_qty = min(qty, pos.qty)
@@ -120,12 +130,13 @@ class OrderAcceptedHandler(Handler):
         if pos.qty <= 0:
             pos.side = ""
             pos.avg_price = Decimal("0")
-        # pending: 平仓待结算（FILLED 时算 PnL = (fill - avg_at_close) × close_qty × 方向符号）
+        # pending: 平仓待结算（FILLED 时算 PnL = (fill - avg_at_close) × close_qty × leverage × 方向符号）
         await ctx.channel.cache.set(pending_key, {
             "kind": "close",
             "qty": close_qty,
             "avg_at_close": avg_at_close,
             "side_at_close": side_at_close,
+            "leverage": leverage,
         })
-        logger.debug("乐观平仓 %s %s 数量=%s 剩余持仓=%s",
-                     oid, side, close_qty, pos.qty)
+        logger.debug("乐观平仓 %s %s 数量=%s 杠杆=%s 剩余持仓=%s",
+                     oid, side, close_qty, leverage, pos.qty)

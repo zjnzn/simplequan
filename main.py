@@ -18,7 +18,9 @@ from app.middleware.amount_check import AmountCheckMiddleware
 from app.middleware.daily_loss import DailyLossMiddleware
 from app.middleware.drawdown import DrawdownMiddleware
 from app.middleware.max_leverage import MaxLeverageMiddleware
+from app.middleware.min_notional import MinNotionalMiddleware
 from app.middleware.per_order_ratio import PerOrderRatioMiddleware
+from app.middleware.position_tolerance import PositionToleranceMiddleware
 from app.middleware.signal_strength import SignalStrengthMiddleware
 from app.pipline.risk import RiskPipeline
 from app.indicator.registry import IndicatorLoader, IndicatorRegistry
@@ -43,6 +45,8 @@ def build_default_pre_pipeline() -> RiskPipeline:
 def build_default_post_pipeline() -> RiskPipeline:
     """构建默认 Post 风控管道（与原 RiskPostCheckHandler 行为一致）。"""
     return RiskPipeline([
+        MinNotionalMiddleware(),
+        PositionToleranceMiddleware(tolerance=0.15),
         AmountCheckMiddleware(),
         MaxLeverageMiddleware(),
         PerOrderRatioMiddleware(),
@@ -127,6 +131,7 @@ async def main() -> None:
         pass
     finally:
         await exchange.close()
+        await connector.close()
 
 
 if __name__ == "__main__":

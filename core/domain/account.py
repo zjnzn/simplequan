@@ -19,6 +19,16 @@ class Position:
     avg_price: Decimal = Decimal("0")
     unrealized_pnl: Decimal = Decimal("0")
 
+    def update_unrealized_pnl(self, current_price: Decimal) -> None:
+        """根据当前价格更新未实现盈亏。无仓位或价格无效时归零。"""
+        if self.qty <= 0 or self.side == "" or current_price <= 0:
+            self.unrealized_pnl = Decimal("0")
+            return
+        if self.side == "BUY":
+            self.unrealized_pnl = (current_price - self.avg_price) * self.qty
+        else:
+            self.unrealized_pnl = (self.avg_price - current_price) * self.qty
+
 
 @dataclass(frozen=True)
 class Balance:
@@ -58,6 +68,20 @@ class SubAccount:
 
     # 杠杆配置
     leverage_config: LeverageConfig = field(default_factory=LeverageConfig)
+
+    # 占用保证金（开仓时增加，平仓时减少；用于防止超额开仓与强平判定）
+    margin_used: Decimal = Decimal("0")
+
+    # 上次 PnL 归零日期（ISO 格式，跨日自动归零）
+    last_pnl_date: str = ""
+
+    def maybe_reset_daily_pnl(self) -> None:
+        """跨日自动归零 daily_pnl。由风控中间件在检查前调用。"""
+        from datetime import date
+        today = date.today().isoformat()
+        if self.last_pnl_date and self.last_pnl_date != today:
+            self.daily_pnl = Decimal("0")
+        self.last_pnl_date = today
 
     def with_position(
         self,

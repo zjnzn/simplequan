@@ -215,16 +215,21 @@ class ExchangeConnector:
                     symbol, payload["type"], payload["side"],
                     payload["amount"], payload.get("price"),
                 )
-                # 回填占位价（OrderAccepted 乐观更新持仓时用，不进入真实交易所）
+                # 回填占位价和杠杆信息（OrderAccepted 乐观更新持仓时用，不进入真实交易所）
                 if "close_price" in payload:
                     raw["close_price"] = payload["close_price"]
+                raw["leverage"] = int(payload.get("leverage", 1) or 1)
+                raw["margin"] = payload.get("margin", 0)
                 # 记录 order_id → channel_id 映射
                 order_id = str(raw.get("id", ""))
                 if order_id:
                     self._order_channel[order_id] = channel_id
-                # 立即回报 created 事件（带 channel_id），包装为 ChannelEvent
-                event = Event(EventType.ORDER_CREATED, symbol, raw)
-                await self._bus.emit(f"{market}/order/{symbol}/{channel_id}/created", event)
+                # 根据交易所实际返回状态发事件（非硬编码 CREATED）
+                status = raw.get("status", "open")
+                event_type = _ORDER_STATUS_MAP.get(status, EventType.ORDER_CREATED)
+                event_name = self._order_event_name(status)
+                event = Event(event_type, symbol, raw)
+                await self._bus.emit(f"{market}/order/{symbol}/{channel_id}/{event_name}", event)
             elif cmd_type == "cancel_order":
                 raw = await self._exchange.cancel_order(payload["order_id"], symbol)
                 event = Event(EventType.ORDER_CANCELED, symbol, raw)

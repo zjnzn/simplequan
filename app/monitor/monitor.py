@@ -65,11 +65,13 @@ class Monitor:
                 "sub_account_id": sub.account_id if sub else None,
                 "leverage": sub.leverage_config.leverage if sub else 0,
                 "allocated_balance": float(sub.allocated_balance) if sub else 0.0,
+                "margin_used": float(sub.margin_used) if sub else 0.0,
                 "daily_pnl": float(sub.daily_pnl) if sub else 0.0,
                 "position": {
                     "side": pos.side,
                     "qty": str(pos.qty),
                     "avg_price": str(pos.avg_price),
+                    "unrealized_pnl": str(pos.unrealized_pnl),
                 } if pos else None,
             })
         return result
@@ -110,6 +112,7 @@ class Monitor:
                 "account_id": sub.account_id,
                 "allocated_balance": float(sub.allocated_balance),
                 "daily_pnl": float(sub.daily_pnl),
+                "margin_used": float(sub.margin_used),
                 "leverage": sub.leverage_config.leverage,
                 "position": {
                     "side": sub.position.side,
@@ -162,6 +165,11 @@ class Monitor:
                     "symbol": s.symbol,
                     "allocated_balance": float(s.allocated_balance),
                     "daily_pnl": float(s.daily_pnl),
+                    "margin_used": float(s.margin_used),
+                    "leverage_config": {
+                        "leverage": s.leverage_config.leverage,
+                        "margin_mode": s.leverage_config.margin_mode,
+                    },
                     "position": {
                         "side": s.position.side,
                         "qty": str(s.position.qty),

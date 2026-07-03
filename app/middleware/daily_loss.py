@@ -17,7 +17,12 @@ class DailyLossMiddleware:
 
     async def check(self, payload, ctx) -> RiskResult:
         sub = ctx.channel.sub_account
-        limit = ctx.channel.config.risk_pre.daily_loss_limit or self._default_limit
+        sub.maybe_reset_daily_pnl()
+        limit = ctx.channel.config.risk_pre.daily_loss_limit
+        if limit is None:
+            limit = self._default_limit
+        elif limit <= 0:
+            return RiskResult.approve()
 
         if sub.daily_pnl <= -limit:
             logger.warning("日亏拒绝: pnl=%.2f 限额=%.2f", sub.daily_pnl, -limit)

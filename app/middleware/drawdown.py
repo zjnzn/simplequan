@@ -20,7 +20,12 @@ class DrawdownMiddleware:
         if sub.allocated_balance <= 0:
             return RiskResult.approve()
 
-        max_dd = ctx.channel.config.risk_pre.max_drawdown or self._default_max
+        sub.maybe_reset_daily_pnl()
+        max_dd = ctx.channel.config.risk_pre.max_drawdown
+        if max_dd is None:
+            max_dd = self._default_max
+        elif max_dd <= 0:
+            return RiskResult.approve()
 
         drawdown = -sub.daily_pnl / sub.allocated_balance
         if drawdown >= max_dd:

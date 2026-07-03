@@ -104,19 +104,20 @@ class OrderResultHandler(Handler):
             logger.debug("开仓均价修正: 真均价=%s 成交=%s 持仓=%s 均价=%s",
                          fill_avg, settled, pos.qty, pos.avg_price)
         elif pending["kind"] == "close":
-            # 平仓成交，按实际成交量算真实 PnL
+            # 平仓成交，按实际成交量算真实 PnL（合约 × leverage 放大）
             avg_at_close = pending["avg_at_close"]
             side_at_close = pending["side_at_close"]
+            leverage = pending.get("leverage", 1)
             # 平多仓(BUY持仓)→(fill-avg)；平空仓(SELL持仓)→(avg-fill)
             if side_at_close == "BUY":
-                pnl = (fill_avg - avg_at_close) * settled
+                pnl = (fill_avg - avg_at_close) * settled * leverage
             else:
-                pnl = (avg_at_close - fill_avg) * settled
+                pnl = (avg_at_close - fill_avg) * settled * leverage
             sub.daily_pnl += pnl
             sub.allocated_balance += pnl
             if pnl != 0:
-                logger.debug("盈亏: %s 方向=%s 盈亏=%.4f 日累计=%.4f",
-                            ctx.channel.id[:8], side, float(pnl), float(sub.daily_pnl))
+                logger.debug("盈亏: %s 方向=%s 杠杆=%s 盈亏=%.4f 日累计=%.4f",
+                            ctx.channel.id[:8], side, leverage, float(pnl), float(sub.daily_pnl))
 
     async def _rollback(self, ctx: Context, pending: dict, qty: Decimal | None = None) -> None:
         """回滚乐观更新的持仓。qty=None 全量回滚，否则回滚指定数量（部分成交差额）。"""
@@ -127,8 +128,13 @@ class OrderResultHandler(Handler):
         rollback_qty = qty if qty is not None else pending["qty"]
 
         if pending["kind"] == "open":
-            # 撤回乐观增加的 qty，重算均价（剔除占位部分）
+            # 撤回乐观增加的 qty + 释放保证金（按比例，仅开仓有保证金占用）
             placeholder = pending["placeholder"]
+            margin_held = Decimal(str(pending.get("margin", 0)))
+            if margin_held > 0 and pending["qty"] > 0:
+                release = margin_held * rollback_qty / pending["qty"]
+                if sub.margin_used >= release:
+                    sub.margin_used -= release
             if pos.qty > 0:
                 other_total = pos.avg_price * pos.qty - placeholder * rollback_qty
                 pos.qty -= rollback_qty
@@ -137,12 +143,12 @@ class OrderResultHandler(Handler):
                 else:
                     pos.side = ""
                     pos.avg_price = Decimal("0")
-            logger.debug("开仓回滚: 数量=%s 剩余持仓=%s", rollback_qty, pos.qty)
+            logger.debug("开仓回滚: 数量=%s 释放保证金=%s 剩余持仓=%s",
+                         rollback_qty, margin_held if margin_held > 0 else 0, pos.qty)
         elif pending["kind"] == "close":
-            # 还原乐观减少的 qty 和均价
+            # 还原乐观减少的 qty 和均价（平仓未占保证金，无需释放）
             pos.qty += rollback_qty
             if pos.side == "" and pos.qty > 0:
-                # 持仓曾被清零，还原平仓前的方向和均价
                 pos.side = pending["side_at_close"]
                 pos.avg_price = pending["avg_at_close"]
             logger.debug("平仓回滚: 数量=%s 剩余持仓=%s 均价=%s",
