@@ -5,11 +5,14 @@ from typing import Protocol, runtime_checkable
 from core.domain.signal import Signal
 
 
-
 @runtime_checkable
 class Strategy(Protocol):
+    """策略插件接口（无状态模板）。参数在调用时注入，不进构造函数。"""
     name: str
     version: str
-    required_indicators: list[str]
 
-    async def on_bar(self, bar, ctx) -> Signal | None: ...
+    def required_indicators(self, params: dict) -> list[str]:
+        """根据 params 返回该策略依赖的指标 key 列表。"""
+        ...
+
+    async def on_bar(self, bar, ctx, params: dict) -> Signal | None: ...

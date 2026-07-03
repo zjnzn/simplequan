@@ -91,7 +91,7 @@ class PositionCalcHandler(Handler):
             qty=order_qty,
             reason=signal.reason,
         )
-        logger.info(
+        logger.debug(
             "仓位计算: %s %s 数量=%.6f 目标=%s 当前=%s 信号=%+.4f 原因=%s",
             target.side, target.symbol, float(target.qty),
             target_signed, current_qty, signal.value, target.reason,

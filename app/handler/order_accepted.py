@@ -63,7 +63,7 @@ class OrderAcceptedHandler(Handler):
             placeholder = Decimal(str(raw.get("close_price", 0))) or None
             await self._optimistic_apply(ctx, order, placeholder)
 
-        logger.info("订单创建: %s %s 订单号=%s", event.symbol, event.type.value, order.order_id)
+        logger.debug("订单创建: %s %s 订单号=%s", event.symbol, event.type.value, order.order_id)
         await ctx.fire_channel_read(Event(EventType.ORDER_CREATED, event.symbol, order))
 
     async def _optimistic_apply(

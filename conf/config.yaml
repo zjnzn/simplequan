@@ -1,30 +1,101 @@
+strategies:
+  ma_cross_over:
+    module: app.strategy.ma_cross.MaCrossStrategy
+  rsi_macd:
+    module: app.strategy.rsi_macd.RsiMacdStrategy
+  bollinger_reversal:
+    module: app.strategy.bollinger.BollingerStrategy
+  macd_cross:
+    module: app.strategy.macd_cross.MacdCrossStrategy
+  adx_trend:
+    module: app.strategy.adx_trend.AdxTrendStrategy
+  stoch:
+    module: app.strategy.stoch.StochStrategy
+  supertrend:
+    module: app.strategy.supertrend.SupertrendStrategy
+
+indicators:
+  ma:
+    module: app.indicator.ma.MaCalculator
+  rsi:
+    module: app.indicator.rsi.RsiCalculator
+  ema:
+    module: app.indicator.ema.EmaCalculator
+  macd:
+    module: app.indicator.macd.MacdCalculator
+  adx:
+    module: app.indicator.adx.AdxCalculator
+  atr:
+    module: app.indicator.atr.AtrCalculator
+  bb:
+    module: app.indicator.bb.BbCalculator
+  cci:
+    module: app.indicator.cci.CciCalculator
+  cmf:
+    module: app.indicator.cmf.CmfCalculator
+  dc:
+    module: app.indicator.dc.DcCalculator
+  ichimoku:
+    module: app.indicator.ichimoku.IchimokuCalculator
+  kc:
+    module: app.indicator.kc.KcCalculator
+  obv:
+    module: app.indicator.obv.ObvCalculator
+  psar:
+    module: app.indicator.psar.PsarCalculator
+  roc:
+    module: app.indicator.roc.RocCalculator
+  stoch:
+    module: app.indicator.stoch.StochCalculator
+  supertrend:
+    module: app.indicator.supertrend.SupertrendCalculator
+  vpt:
+    module: app.indicator.vpt.VptCalculator
+  vwap:
+    module: app.indicator.vwap.VwapCalculator
+  willr:
+    module: app.indicator.williams.WilliamsRCalculator
+
 exchange:
+  mode: hybrid            # simulated=纯内存模拟 | hybrid=真实行情+虚拟撮合
+  name: binance           # ccxt.pro 交易所 id
+  proxy: "http://127.0.0.1:7897"  # 本地代理，空=直连
   api_key: "xAhuEBwlfBN0PmY52XWDxrVisdf14O5voNyPCeJm4qPFUKUynGDlXjWejz4OBl1I"
   api_secret: "BpkKYp8lOwimo73LwzbpNHIEFpoJ8XSZKLfGaZPhFy72rNzD427sutBKnkxzax0Q"
 
 channel:
   BTC/USDT:
     market: futures
-    allocation: 0.4
+    allocation: 0.3
     intervals:
       1m:
         strategy:
           name: ma_cross_over
           params: { fast: 5, slow: 20 }
           indicators:
-            - module: app.indicator.ma.MaCalculator
+            - name: ma
               params: { periods: [5, 20] }
         risk_pre:  { daily_loss_limit: 500, max_drawdown: 0.08 }
         risk_post: { max_per_order_ratio: 0.1, max_leverage: 20 }
       5m:
         strategy:
-          name: ma_cross_over
-          params: { fast: 5, slow: 20 }
+          name: macd_cross
+          params: { fast: 12, slow: 26, signal: 9 }
           indicators:
-            - module: app.indicator.ma.MaCalculator
-              params: { periods: [5, 20] }
+            - name: macd
+              params: { fast: 12, slow: 26, signal: 9 }
+        risk_pre:  { daily_loss_limit: 500, max_drawdown: 0.08 }
+        risk_post: { max_per_order_ratio: 0.1, max_leverage: 20 }
+      1h:
+        strategy:
+          name: adx_trend
+          params: { period: 14, threshold: 25 }
+          indicators:
+            - name: adx
+              params: { period: 14 }
         risk_pre:  { daily_loss_limit: 800, max_drawdown: 0.1 }
         risk_post: { max_per_order_ratio: 0.15, max_leverage: 10 }
+
   ETH/USDT:
     market: futures
     allocation: 0.3
@@ -32,21 +103,22 @@ channel:
       5m:
         strategy:
           name: rsi_macd
-          params: { rsi_oversold: 30, rsi_overbought: 70 }
+          params: { period: 14, oversold: 30, overbought: 70 }
           indicators:
-            - module: app.indicator.rsi.RsiCalculator
+            - name: rsi
               params: { period: 14 }
         risk_pre:  { daily_loss_limit: 500, max_drawdown: 0.08 }
         risk_post: { max_per_order_ratio: 0.1, max_leverage: 20 }
       15m:
         strategy:
-          name: rsi_macd
-          params: { rsi_oversold: 30, rsi_overbought: 70 }
+          name: stoch
+          params: { k_period: 14, d_period: 3, overbought: 80, oversold: 20 }
           indicators:
-            - module: app.indicator.rsi.RsiCalculator
-              params: { period: 14 }
+            - name: stoch
+              params: { k_period: 14, d_period: 3 }
         risk_pre:  { daily_loss_limit: 300, max_drawdown: 0.05 }
         risk_post: { max_per_order_ratio: 0.08, max_leverage: 15 }
+
   BNB/USDT:
     market: futures
     allocation: 0.2
@@ -54,14 +126,18 @@ channel:
       5m:
         strategy:
           name: bollinger_reversal
-          params: { period: 20, std_mult: 2.0 }
-          indicators: []
+          params: { period: 20, std_dev: 2.0 }
+          indicators:
+            - name: bb
+              params: { period: 20, std_dev: 2.0 }
         risk_pre:  { daily_loss_limit: 500, max_drawdown: 0.08 }
         risk_post: { max_per_order_ratio: 0.1, max_leverage: 20 }
       1h:
         strategy:
-          name: bollinger_reversal
-          params: { period: 20, std_mult: 2.0 }
-          indicators: []
+          name: supertrend
+          params: { period: 10, multiplier: 3.0 }
+          indicators:
+            - name: supertrend
+              params: { period: 10, multiplier: 3.0 }
         risk_pre:  { daily_loss_limit: 400, max_drawdown: 0.06 }
         risk_post: { max_per_order_ratio: 0.12, max_leverage: 12 }

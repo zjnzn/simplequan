@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quanquan Monitor</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a2029;
+    --panel-2: #232b36;
+    --border: #2d3748;
+    --text: #e2e8f0;
+    --text-dim: #8b95a5;
+    --green: #48bb78;
+    --red: #f56565;
+    --blue: #4299e1;
+    --yellow: #ecc94b;
+    --purple: #9f7aea;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  .header {
+    background: linear-gradient(135deg, #1a2029 0%, #2d3748 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .header h1 .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--green); margin-right: 8px;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .header .meta { font-size: 12px; color: var(--text-dim); }
+
+  .master-bar {
+    display: flex; gap: 16px; padding: 16px 24px;
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .stat {
+    background: var(--panel-2); border-radius: 8px; padding: 10px 16px;
+    min-width: 140px;
+  }
+  .stat .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat .value { font-size: 18px; font-weight: 600; margin-top: 2px; }
+  .stat .value.pos { color: var(--green); }
+  .stat .value.neg { color: var(--red); }
+
+  .layout {
+    display: grid; grid-template-columns: 320px 1fr; gap: 16px;
+    padding: 16px 24px; align-items: start;
+  }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+  .channel-list {
+    background: var(--panel); border-radius: 10px; border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .channel-list .head {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    font-weight: 600; font-size: 13px; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .channel-item {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    cursor: pointer; transition: background 0.15s;
+  }
+  .channel-item:hover { background: var(--panel-2); }
+  .channel-item.active { background: var(--panel-2); border-left: 3px solid var(--blue); padding-left: 13px; }
+  .channel-item .cid { font-weight: 600; font-size: 13px; }
+  .channel-item .sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; display: flex; gap: 10px; }
+  .channel-item .pnl { font-weight: 600; font-size: 12px; }
+  .pnl.pos { color: var(--green); }
+  .pnl.neg { color: var(--red); }
+
+  .detail { display: flex; flex-direction: column; gap: 16px; }
+  .card {
+    background: var(--panel); border-radius: 10px; border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .card .head {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    font-weight: 600; font-size: 13px; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .card .body { padding: 16px; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 700px) { .grid-2 { grid-template-columns: 1fr; } }
+  .field { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .field:last-child { border-bottom: none; }
+  .field .k { color: var(--text-dim); font-size: 12px; }
+  .field .v { font-weight: 500; font-family: "SF Mono", Consolas, monospace; font-size: 12px; }
+
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 600;
+  }
+  .badge.long { background: rgba(72,187,120,0.2); color: var(--green); }
+  .badge.short { background: rgba(245,101,101,0.2); color: var(--red); }
+  .badge.hold { background: rgba(139,149,165,0.2); color: var(--text-dim); }
+  .badge.buy { background: rgba(72,187,120,0.2); color: var(--green); }
+  .badge.sell { background: rgba(245,101,101,0.2); color: var(--red); }
+
+  .tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .tab {
+    padding: 10px 16px; cursor: pointer; font-size: 13px;
+    color: var(--text-dim); border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--text-dim); cursor: pointer;
+    font-size: 12px; transition: all 0.15s;
+  }
+  .btn:hover { color: var(--text); border-color: #4a5568; background: #2d3748; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; padding: 8px 12px; color: var(--text-dim); font-weight: 500; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--border); font-family: "SF Mono", Consolas, monospace; white-space: nowrap; }
+  tr:hover { background: var(--panel-2); }
+  .table-wrap { max-height: 420px; overflow: auto; }
+
+  .empty { padding: 32px; text-align: center; color: var(--text-dim); font-size: 13px; }
+  .num.pos { color: var(--green); }
+  .num.neg { color: var(--red); }
+  .loading { padding: 40px; text-align: center; color: var(--text-dim); }
+
+  /* 深色主题滚动条 —— 覆盖浏览器默认白色滚动条 */
+  * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  *::-webkit-scrollbar-thumb:hover { background: #3a4658; }
+  *::-webkit-scrollbar-corner { background: transparent; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1><span class="dot"></span>Quanquan Monitor</h1>
+  <div style="display:flex;align-items:center;gap:12px">
+    <button class="btn" onclick="exportChannelsCSV()" title="导出所有 channel 汇总为 CSV">导出 Channels</button>
+    <div class="meta" id="updateTime">-</div>
+  </div>
+</div>
+<div class="master-bar" id="masterBar"></div>
+<div class="layout">
+  <div class="channel-list">
+    <div class="head">Channels (<span id="chCount">0</span>)</div>
+    <div id="channelItems"></div>
+  </div>
+  <div class="detail" id="detail">
+    <div class="loading">选择左侧 channel 查看详情</div>
+  </div>
+</div>
+
+<script>
+const API = "";
+let channels = [];
+let activeId = null;
+let activeTab = "signals";
+let lastTabData = [];
+
+async function get(url) {
+  const r = await fetch(API + url);
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+function fmt(n, d=2) {
+  if (n == null || n === "") return "-";
+  const x = parseFloat(n);
+  if (isNaN(x)) return n;
+  return x.toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d });
+}
+function pnlClass(n) { return parseFloat(n) >= 0 ? "pos" : "neg"; }
+function ts(t) {
+  if (!t) return "-";
+  const d = new Date(t > 1e12 ? t : t * 1000);
+  return d.toLocaleTimeString("en-US", { hour12: false });
+}
+
+async function loadOverview() {
+  try {
+    const d = await get("/");
+    document.getElementById("updateTime").textContent = "更新于 " + new Date().toLocaleTimeString("en-US", { hour12: false });
+    const m = d.master;
+    document.getElementById("masterBar").innerHTML = `
+      <div class="stat"><div class="label">Master 余额</div><div class="value">${fmt(m.balance_total)}</div></div>
+      <div class="stat"><div class="label">子账号</div><div class="value">${m.subs_count}</div></div>
+      <div class="stat"><div class="label">Channels</div><div class="value">${d.channels_count}</div></div>
+      <div class="stat"><div class="label">总日盈亏</div><div class="value ${pnlClass(d.total_daily_pnl)}">${fmt(d.total_daily_pnl)}</div></div>
+    `;
+    channels = d.channels;
+    document.getElementById("chCount").textContent = channels.length;
+    renderList();
+    // 仅在未选中时自动渲染默认提示；选中后不覆盖 detail，避免丢失 tab/滚动位置
+    if (!activeId) {
+      document.getElementById("detail").innerHTML = `<div class="loading">选择左侧 channel 查看详情</div>`;
+    } else {
+      // 详情数据轻量刷新（只更新持仓/盈亏字段，不重建整个 DOM 以保留 tab 与滚动）
+      await refreshDetailFields();
+    }
+  } catch (e) { console.error(e); }
+}
+
+// 选中 channel 后的详情面板已由 renderDetail 建好；定时刷新只更新动态字段
+async function refreshDetailFields() {
+  try {
+    const ch = await get("/channels/" + activeId);
+    const sub = ch.sub_account || {};
+    const pos = sub.position || {};
+    const sig = ch.current_signal || {};
+    const hist = ch.history || {};
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.innerHTML = v; };
+    const sigBadge = sig.direction ? `<span class="badge ${sig.direction.toLowerCase()}">${sig.direction}</span>` : '<span class="badge hold">无</span>';
+    const posBadge = pos.side ? `<span class="badge ${pos.side.toLowerCase()}">${pos.side}</span>` : '<span class="badge hold">空仓</span>';
+    set("f-posSide", posBadge);
+    set("f-posQty", pos.qty || "0");
+    set("f-posAvg", fmt(pos.avg_price, 4));
+    set("f-posPnl", pos.unrealized_pnl || "0");
+    set("f-alloc", fmt(sub.allocated_balance));
+    set("f-dailyPnl", `<span class="${pnlClass(sub.daily_pnl)}">${fmt(sub.daily_pnl)}</span>`);
+    set("f-sig", `${sigBadge} ${sig.reason || ""}`);
+    // tab 计数
+    document.querySelectorAll(".tab").forEach(t => {
+      const k = t.dataset.k;
+      if (k && hist[k] != null) {
+        const label = t.textContent.replace(/\s*\(\d+\)/, "");
+        t.textContent = `${label} (${hist[k]})`;
+      }
+    });
+  } catch (e) { /* 静默：详情刷新失败不阻塞概览 */ }
+}
+
+function renderList() {
+  const html = channels.map(c => {
+    const active = c.instance_id === activeId ? "active" : "";
+    const pnl = parseFloat(c.daily_pnl);
+    return `
+      <div class="channel-item ${active}" onclick="selectChannel('${c.instance_id}')">
+        <div class="cid">${c.symbol} <span style="color:var(--text-dim)">@ ${c.interval}</span></div>
+        <div class="sub">
+          <span>${c.position.side || "空仓"}</span>
+          <span class="pnl ${pnlClass(pnl)}">${pnl >= 0 ? "+" : ""}${fmt(pnl)}</span>
+        </div>
+      </div>`;
+  }).join("");
+  document.getElementById("channelItems").innerHTML = html;
+}
+
+function selectChannel(id) {
+  activeId = id;
+  activeTab = "signals";
+  renderList();
+  renderDetail();
+}
+
+async function renderDetail() {
+  if (!activeId) return;
+  document.getElementById("detail").innerHTML = `<div class="loading">加载中...</div>`;
+  try {
+    const ch = await get("/channels/" + activeId);
+    const sub = ch.sub_account || {};
+    const pos = sub.position || {};
+    const sig = ch.current_signal || {};
+    const inds = ch.current_indicators || {};
+    const hist = ch.history || {};
+
+    const sigBadge = sig.direction ? `<span class="badge ${sig.direction.toLowerCase()}">${sig.direction}</span>` : '<span class="badge hold">无</span>';
+    const posBadge = pos.side ? `<span class="badge ${pos.side.toLowerCase()}">${pos.side}</span>` : '<span class="badge hold">空仓</span>';
+    const mi = ch.market_info || {};
+    const pct = (v) => v != null ? (v * 100).toFixed(3) + "%" : "-";
+
+    document.getElementById("detail").innerHTML = `
+      <div class="card">
+        <div class="head"><span>${ch.symbol} @ ${ch.interval}</span><span style="text-transform:none;color:var(--text-dim);font-weight:400;font-size:11px">${ch.channel_id}</span></div>
+        <div class="body">
+          <div class="grid-2">
+            <div>
+              <div class="field"><span class="k">持仓方向</span><span class="v" id="f-posSide">${posBadge}</span></div>
+              <div class="field"><span class="k">持仓数量</span><span class="v" id="f-posQty">${pos.qty || "0"}</span></div>
+              <div class="field"><span class="k">均价</span><span class="v" id="f-posAvg">${fmt(pos.avg_price, 4)}</span></div>
+              <div class="field"><span class="k">未实现盈亏</span><span class="v" id="f-posPnl">${pos.unrealized_pnl || "0"}</span></div>
+            </div>
+            <div>
+              <div class="field"><span class="k">分配余额</span><span class="v" id="f-alloc">${fmt(sub.allocated_balance)}</span></div>
+              <div class="field"><span class="k">日盈亏</span><span class="v" id="f-dailyPnl">${fmt(sub.daily_pnl)}</span></div>
+              <div class="field"><span class="k">杠杆</span><span class="v">${sub.leverage}x</span></div>
+              <div class="field"><span class="k">当前信号</span><span class="v" id="f-sig">${sigBadge} ${sig.reason || ""}</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head">市场信息 <span style="text-transform:none;color:var(--text-dim);font-weight:400;font-size:11px">${mi.market || ch.market_type || "-"}</span></div>
+        <div class="body">
+          <div class="grid-2">
+            <div>
+              <div class="field"><span class="k">价格精度</span><span class="v">${mi.price_precision ?? "-"}</span></div>
+              <div class="field"><span class="k">数量精度</span><span class="v">${mi.amount_precision ?? "-"}</span></div>
+              <div class="field"><span class="k">最小数量</span><span class="v">${fmt(mi.min_amount, 6)}</span></div>
+              <div class="field"><span class="k">最大数量</span><span class="v">${mi.max_amount > 0 ? fmt(mi.max_amount, 4) : "无上限"}</span></div>
+              <div class="field"><span class="k">最小成本</span><span class="v">${fmt(mi.min_cost, 4)}</span></div>
+              <div class="field"><span class="k">最小价格</span><span class="v">${fmt(mi.min_price, 6)}</span></div>
+            </div>
+            <div>
+              <div class="field"><span class="k">Maker 费率</span><span class="v">${pct(mi.maker_fee)}</span></div>
+              <div class="field"><span class="k">Taker 费率</span><span class="v">${pct(mi.taker_fee)}</span></div>
+              <div class="field"><span class="k">合约面值</span><span class="v">${fmt(mi.contract_size, 4)}</span></div>
+              <div class="field"><span class="k">结算币种</span><span class="v">${mi.settle || "-"}</span></div>
+              <div class="field"><span class="k">合约类型</span><span class="v">${mi.is_linear ? "线性(U本位)" : "反向(币本位)"}</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head">当前指标</div>
+        <div class="body">
+          ${Object.keys(inds).length ? Object.entries(inds).map(([iv, d]) =>
+            `<div style="margin-bottom:8px"><div style="color:var(--text-dim);font-size:11px;margin-bottom:4px">${iv}</div>
+             <div style="display:flex;flex-wrap:wrap;gap:12px">${Object.entries(d).map(([k,v]) =>
+               `<span><span style="color:var(--text-dim)">${k}:</span> <span style="font-family:monospace">${v}</span></span>`).join("")}</div></div>`
+          ).join("") : '<div class="empty">无指标</div>'}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head"><span>历史数据</span><button class="btn" onclick="exportTabCSV()">导出 CSV</button></div>
+        <div class="tabs">
+          <div class="tab ${activeTab==='signals'?'active':''}" data-k="signals" onclick="switchTab('signals')">Signals (${hist.signals||0})</div>
+          <div class="tab ${activeTab==='orders'?'active':''}" data-k="orders" onclick="switchTab('orders')">Orders (${hist.orders||0})</div>
+          <div class="tab ${activeTab==='klines'?'active':''}" data-k="klines" onclick="switchTab('klines')">Klines (${hist.klines||0})</div>
+          <div class="tab ${activeTab==='indicators'?'active':''}" data-k="indicators" onclick="switchTab('indicators')">Indicators (${hist.indicators||0})</div>
+        </div>
+        <div class="table-wrap" id="tabBody"></div>
+      </div>
+    `;
+    loadTab();
+  } catch (e) {
+    document.getElementById("detail").innerHTML = `<div class="empty">加载失败: ${e.message}</div>`;
+  }
+}
+
+function switchTab(t) {
+  activeTab = t;
+  document.querySelectorAll(".tab").forEach(el => el.classList.remove("active"));
+  event.target.classList.add("active");
+  loadTab();
+}
+
+async function loadTab() {
+  const body = document.getElementById("tabBody");
+  if (!body) return;
+  body.innerHTML = `<div class="loading">加载中...</div>`;
+  try {
+    const data = await get(`/channels/${activeId}/${activeTab}?limit=50`);
+    lastTabData = data;
+    body.innerHTML = renderTable(activeTab, data);
+  } catch (e) { body.innerHTML = `<div class="empty">加载失败</div>`; }
+}
+
+function renderTable(kind, data) {
+  if (!data || !data.length) return '<div class="empty">无数据</div>';
+  let th = "", rows = "";
+  if (kind === "signals") {
+    th = "<tr><th>时间</th><th>方向</th><th>强度</th><th>值</th><th>原因</th></tr>";
+    rows = data.map(s => `<tr><td>${ts(s.timestamp)}</td><td><span class="badge ${s.direction.toLowerCase()}">${s.direction}</span></td><td>${fmt(s.strength, 4)}</td><td>${fmt(s.value, 4)}</td><td>${s.reason}</td></tr>`).join("");
+  } else if (kind === "orders") {
+    th = "<tr><th>订单号</th><th>事件</th><th>方向</th><th>状态</th><th>数量</th><th>成交量</th><th>均价</th></tr>";
+    rows = data.map(o => `<tr><td>${o.order_id}</td><td>${o.event||"-"}</td><td>${o.side?`<span class="badge ${o.side.toLowerCase()}">${o.side}</span>`:"-"}</td><td>${o.state||"-"}</td><td>${o.qty!=null?fmt(o.qty,8):"-"}</td><td>${o.filled_qty!=null?fmt(o.filled_qty,8):"-"}</td><td>${o.avg_price!=null?fmt(o.avg_price,4):"-"}</td></tr>`).join("");
+  } else if (kind === "klines") {
+    th = "<tr><th>时间</th><th>开</th><th>高</th><th>低</th><th>收</th><th>量</th></tr>";
+    rows = data.map(k => `<tr><td>${ts(k.timestamp)}</td><td>${fmt(k.open,4)}</td><td>${fmt(k.high,4)}</td><td>${fmt(k.low,4)}</td><td>${fmt(k.close,4)}</td><td>${fmt(k.volume,2)}</td></tr>`).join("");
+  } else if (kind === "indicators") {
+    th = "<tr><th>时间</th><th>指标</th></tr>";
+    rows = data.map(d => `<tr><td>${ts(d.timestamp)}</td><td>${Object.entries(d.indicators||{}).map(([k,v])=>`${k}=${v}`).join("  ")}</td></tr>`).join("");
+  }
+  return `<table>${th}${rows}</table>`;
+}
+
+/* ---- 导出 ---- */
+function downloadCSV(filename, rows) {
+  const bom = "﻿";
+  const csv = bom + rows.map(r => r.map(quoteCSV).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+function quoteCSV(v) {
+  if (v == null) return "";
+  const s = String(v).replace(/"/g, '""');
+  return /[",\n\r]/.test(s) ? `"${s}"` : s;
+}
+
+function exportTabCSV() {
+  if (!lastTabData.length) return;
+  const chName = channels.find(c => c.instance_id === activeId);
+  const sym = chName ? chName.symbol + "@" + chName.interval : activeId;
+  const rows = [];
+  if (activeTab === "signals") {
+    rows.push(["时间","方向","强度","值","原因"]);
+    lastTabData.forEach(s => rows.push([ts(s.timestamp), s.direction, s.strength, s.value, s.reason]));
+  } else if (activeTab === "orders") {
+    rows.push(["订单号","事件","方向","状态","数量","成交量","均价"]);
+    lastTabData.forEach(o => rows.push([o.order_id, o.event||"", o.side||"", o.state||"", o.qty, o.filled_qty, o.avg_price]));
+  } else if (activeTab === "klines") {
+    rows.push(["时间","开","高","低","收","量"]);
+    lastTabData.forEach(k => rows.push([ts(k.timestamp), k.open, k.high, k.low, k.close, k.volume]));
+  } else if (activeTab === "indicators") {
+    rows.push(["时间","指标"]);
+    lastTabData.forEach(d => rows.push([ts(d.timestamp), Object.entries(d.indicators||{}).map(([k,v])=>`${k}=${v}`).join("  ")]));
+  }
+  downloadCSV(`${sym}_${activeTab}.csv`, rows);
+}
+
+function exportChannelsCSV() {
+  const rows = [["channel_id","symbol","interval","market","leverage","alloc","daily_pnl","pos_side","pos_qty","pos_avg","amount_prec","price_prec","taker_fee","contract_size","settle","linear"]];
+  channels.forEach(c => {
+    const mi = c.market_info || {};
+    const pos = c.position || {};
+    rows.push([c.channel_id, c.symbol, c.interval, mi.market||c.market_type||"", c.leverage, c.allocated_balance, c.daily_pnl, pos.side||"", pos.qty||"0", pos.avg_price||"0", mi.amount_precision||"", mi.price_precision||"", mi.taker_fee||"", mi.contract_size||"", mi.settle||"", mi.is_linear?"Y":"N"]);
+  });
+  downloadCSV("channels.csv", rows);
+}
+
+loadOverview();
+setInterval(loadOverview, 2000);
+</script>
+</body>
+</html>

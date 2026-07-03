@@ -11,7 +11,6 @@ from typing import Any
 from app.middleware.amount_check import AmountCheckMiddleware
 from app.middleware.daily_loss import DailyLossMiddleware
 from app.middleware.drawdown import DrawdownMiddleware
-from app.middleware.global_loss import GlobalLossMiddleware
 from app.middleware.max_leverage import MaxLeverageMiddleware
 from app.middleware.per_order_ratio import PerOrderRatioMiddleware
 from core.domain.risk import RiskResult

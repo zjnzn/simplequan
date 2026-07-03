@@ -66,7 +66,7 @@ class OrderResultHandler(Handler):
                 await self._rollback(ctx, pending)
             await ctx.channel.cache.delete(pending_key)
 
-        logger.info("订单回报: %s %s 订单号=%s 方向=%s 成交=%s",
+        logger.debug("订单回报: %s %s 订单号=%s 方向=%s 成交=%s",
                     event.symbol, event.type.value, order_id, side, filled_qty)
         await ctx.fire_channel_read(event)
 
@@ -84,7 +84,10 @@ class OrderResultHandler(Handler):
             return
         pos = sub.position
         pending_qty = pending["qty"]
-        # 实际成交量不超过 pending 量
+        # 实际成交量不超过 pending 量（防御超量成交：真实交易所可能返回 filled>amount）
+        if filled_qty > pending_qty:
+            logger.warning("成交超量: filled=%s pending=%s，按 pending 结算",
+                           filled_qty, pending_qty)
         settled = min(filled_qty, pending_qty)
 
         # 部分成交：先回滚未成交差额（回滚后持仓只剩已成交部分）
@@ -112,7 +115,7 @@ class OrderResultHandler(Handler):
             sub.daily_pnl += pnl
             sub.allocated_balance += pnl
             if pnl != 0:
-                logger.info("盈亏: %s 方向=%s 盈亏=%.4f 日累计=%.4f",
+                logger.debug("盈亏: %s 方向=%s 盈亏=%.4f 日累计=%.4f",
                             ctx.channel.id[:8], side, float(pnl), float(sub.daily_pnl))
 
     async def _rollback(self, ctx: Context, pending: dict, qty: Decimal | None = None) -> None:
@@ -136,8 +139,11 @@ class OrderResultHandler(Handler):
                     pos.avg_price = Decimal("0")
             logger.debug("开仓回滚: 数量=%s 剩余持仓=%s", rollback_qty, pos.qty)
         elif pending["kind"] == "close":
-            # 还原乐观减少的 qty
+            # 还原乐观减少的 qty 和均价
             pos.qty += rollback_qty
             if pos.side == "" and pos.qty > 0:
+                # 持仓曾被清零，还原平仓前的方向和均价
                 pos.side = pending["side_at_close"]
-            logger.debug("平仓回滚: 数量=%s 剩余持仓=%s", rollback_qty, pos.qty)
+                pos.avg_price = pending["avg_at_close"]
+            logger.debug("平仓回滚: 数量=%s 剩余持仓=%s 均价=%s",
+                         rollback_qty, pos.qty, pos.avg_price)

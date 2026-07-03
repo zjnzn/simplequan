@@ -18,7 +18,7 @@ from app.cache.memory import MemoryCache
 from app.channel.channel import SymbolChannel
 from app.eventbus.eventbus import ChannelEventBus
 from app.pipline.pipline import ChannelPipeline
-from core.domain.account import MasterAccount, SubAccount
+from core.domain.account import MasterAccount, Position, SubAccount
 from core.domain.config import AppConfig, ChannelConfig
 from core.domain.symbol import Symbol
 from core.ports.pipline import Pipeline
@@ -128,12 +128,19 @@ class Bootstrap:
         sub = None
         if self._master:
             allocated = self._master.balance.total * Decimal(str(cfg.allocation))
+            master_pos = self._master.get_position(symbol.symbol)
+            # 深拷贝 Position：master 可能已持仓，共享引用会导致多 channel 持仓串台
             sub = SubAccount(
                 account_id=cfg.channel_id,
                 master_id=self._master.account_id,
                 symbol=symbol.symbol,
                 allocated_balance=allocated,
-                position=self._master.get_position(symbol.symbol),
+                position=Position(
+                    side=master_pos.side,
+                    qty=master_pos.qty,
+                    avg_price=master_pos.avg_price,
+                    unrealized_pnl=master_pos.unrealized_pnl,
+                ),
                 leverage_config=self._master.get_leverage(symbol.symbol),
             )
             self._master = self._master.add_sub_account(sub)

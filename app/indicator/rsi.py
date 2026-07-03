@@ -3,11 +3,9 @@ from __future__ import annotations
 from collections import deque
 from decimal import Decimal
 
-from core.ports.indicator import Indicator
 
-
-class RsiCalculator(Indicator):
-    """RSI 相对强弱指标计算器。
+class RsiCalculator:
+    """RSI 相对强弱指标计算器（Wilder's RMA 平滑，对齐 project_refactored）。
 
     params:
         period: RSI 周期，默认 14
@@ -15,28 +13,34 @@ class RsiCalculator(Indicator):
     name = "rsi"
     version = "1.0.0"
 
-    def __init__(self, period: int = 14) -> None:
-        self._period = period
-        self.output_keys = [f"rsi_{period}"]
+    def output_keys(self, params: dict) -> list[str]:
+        period = params.get("period", 14)
+        return [f"rsi_{period}"]
 
-    def compute(self, bars: deque) -> dict[str, Decimal]:
-        closes = [b.close for b in bars]
-        if len(closes) < self._period + 1:
+    def compute(self, bars: deque, params: dict) -> dict[str, Decimal]:
+        period = params.get("period", 14)
+        closes = [float(b.close) for b in bars]
+        n = len(closes)
+        if n < period + 1:
             return {}
 
-        gains = Decimal(0)
-        losses = Decimal(0)
-        recent = closes[-(self._period + 1):]
-        for i in range(1, len(recent)):
-            delta = recent[i] - recent[i - 1]
-            if delta > 0:
-                gains += delta
-            else:
-                losses += abs(delta)
+        # 1. 价格变动
+        gain_full = [float("nan")]
+        loss_full = [float("nan")]
+        for i in range(1, n):
+            delta = closes[i] - closes[i - 1]
+            gain_full.append(delta if delta > 0 else 0.0)
+            loss_full.append(-delta if delta < 0 else 0.0)
 
-        if losses == 0:
-            return {self.output_keys[0]: Decimal(100)}
+        # 2. Wilder's RMA 平滑
+        from ._helpers import rma
+        avg_gain = rma(gain_full, period)
+        avg_loss = rma(loss_full, period)
 
-        rs = (gains / self._period) / (losses / self._period)
-        rsi = Decimal(100) - (Decimal(100) / (1 + rs))
-        return {self.output_keys[0]: rsi}
+        key = f"rsi_{period}"
+        if avg_loss[-1] == 0:
+            return {key: Decimal(str(100))}
+
+        rs = avg_gain[-1] / avg_loss[-1]
+        rsi = 100.0 - 100.0 / (1.0 + rs)
+        return {key: Decimal(str(rsi))}

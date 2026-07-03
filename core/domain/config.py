@@ -14,10 +14,24 @@ import yaml
 # ── 子配置 ──────────────────────────────────────────────
 
 @dataclass(frozen=True, slots=True)
-class IndicatorConfig:
-    """指标计算器配置。"""
+class IndicatorDef:
+    """指标注册表条目：name → 模块路径。默认参数由指标类内 params.get(k, 默认) 兜底。"""
+    name: str
     module: str
+
+
+@dataclass(frozen=True, slots=True)
+class IndicatorConfig:
+    """channel 内指标引用：name 指向注册表条目，params 为调用时注入参数。"""
+    name: str
     params: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class StrategyDef:
+    """策略注册表条目：name → 模块路径。默认参数由策略类内 params.get(k, 默认) 兜底。"""
+    name: str
+    module: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,9 +83,17 @@ class ChannelConfig:
 
 @dataclass(frozen=True, slots=True)
 class ExchangeConfig:
-    """交易所连接配置。"""
+    """交易所连接配置。
+
+    mode: simulated=纯内存模拟；hybrid=真实行情+虚拟撮合。
+    name: ccxt.pro 交易所 id（如 binance），hybrid 模式下使用。
+    proxy: 本地代理地址（如 http://127.0.0.1:7897），空表示直连。
+    """
     api_key: str = ""
     api_secret: str = ""
+    mode: str = "simulated"
+    name: str = "binance"
+    proxy: str = ""
 
 
 @dataclass(slots=True)
@@ -79,6 +101,8 @@ class AppConfig:
     """应用顶层配置。"""
     exchange: ExchangeConfig = field(default_factory=ExchangeConfig)
     channels: list[ChannelConfig] = field(default_factory=list)
+    strategies: dict[str, StrategyDef] = field(default_factory=dict)
+    indicators: dict[str, IndicatorDef] = field(default_factory=dict)
 
     def by_channel_id(self) -> dict[str, ChannelConfig]:
         """按 channel_id 索引。"""
@@ -94,7 +118,7 @@ class AppConfig:
 
 def _parse_indicator(raw: dict[str, Any]) -> IndicatorConfig:
     return IndicatorConfig(
-        module=raw["module"],
+        name=raw["name"],
         params=raw.get("params", {}),
     )
 
@@ -120,15 +144,40 @@ def _parse_channel(symbol: str, market: str, allocation: float,
     )
 
 
+def _parse_strategies(raw: dict[str, Any] | None) -> dict[str, StrategyDef]:
+    if not raw:
+        return {}
+    return {
+        name: StrategyDef(name=name, module=item["module"])
+        for name, item in raw.items()
+    }
+
+
+def _parse_indicators(raw: dict[str, Any] | None) -> dict[str, IndicatorDef]:
+    if not raw:
+        return {}
+    return {
+        name: IndicatorDef(name=name, module=item["module"])
+        for name, item in raw.items()
+    }
+
+
 def load_config(path: str | Path = "conf/config.yaml") -> AppConfig:
     """从 YAML 文件加载配置，返回 AppConfig。"""
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
+    ex_data = data.get("exchange", {})
     exchange = ExchangeConfig(
-        api_key=data.get("exchange", {}).get("api_key", ""),
-        api_secret=data.get("exchange", {}).get("api_secret", ""),
+        api_key=ex_data.get("api_key", ""),
+        api_secret=ex_data.get("api_secret", ""),
+        mode=ex_data.get("mode", "simulated"),
+        name=ex_data.get("name", "binance"),
+        proxy=ex_data.get("proxy", ""),
     )
+
+    strategies = _parse_strategies(data.get("strategies"))
+    indicators = _parse_indicators(data.get("indicators"))
 
     channels: list[ChannelConfig] = []
     for symbol, sym_cfg in data.get("channel", {}).items():
@@ -139,4 +188,5 @@ def load_config(path: str | Path = "conf/config.yaml") -> AppConfig:
                 _parse_channel(symbol, market, allocation, interval, int_cfg)
             )
 
-    return AppConfig(exchange=exchange, channels=channels)
+    return AppConfig(exchange=exchange, channels=channels,
+                     strategies=strategies, indicators=indicators)
