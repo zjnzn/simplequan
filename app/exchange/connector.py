@@ -81,6 +81,8 @@ class ExchangeConnector:
         self._readers: dict[str, asyncio.Task] = {}
         # order_id → channel_id 映射，确保订单回报路由到正确的 Channel
         self._order_channel: dict[str, str] = {}
+        # K线去重：symbol@timeframe → 最后 emit 的 candle 时间戳(ms)
+        self._last_ohlcv_ts: dict[str, int] = {}
 
         self._bus.on("request/*", self._on_request)
         self._bus.on("command/*", self._on_command)
@@ -124,9 +126,27 @@ class ExchangeConnector:
     async def _kline_loop(self, market: str, symbol: str, sym_compact: str, timeframe: str) -> None:
         topic = f"{market}/kline/{symbol}@{timeframe}"
         error_topic = f"{market}/error/{sym_compact}/kline"
+
+        # 预热：REST 拉 500 根历史 K 线，保证指标刚启动就有数据可算
+        try:
+            history = await self._exchange.fetch_ohlcv(symbol, timeframe, limit=500)
+            if history:
+                event = Event(EventType.KLINE, symbol, {"timeframe": timeframe, "ohlcv": history})
+                await self._bus.emit(topic, event)
+                logger.info("K线预热完成 %s@%s: %d 根", symbol, timeframe, len(history))
+        except Exception as exc:
+            logger.warning("K线预热失败 %s@%s: %s，跳过进入实时", symbol, timeframe, exc)
+
+        _dedup_key = f"{symbol}@{timeframe}"
         while True:
             try:
                 ohlcv = await self._exchange.watch_ohlcv(symbol, timeframe)
+                # ccxt 每个 tick 都触发 watch_ohlcv，同一 bar 时间戳不变 → 跳过
+                latest_ts = ohlcv[-1][0] if ohlcv else 0
+                if latest_ts and latest_ts == self._last_ohlcv_ts.get(_dedup_key):
+                    continue
+                if latest_ts:
+                    self._last_ohlcv_ts[_dedup_key] = latest_ts
                 event = Event(EventType.KLINE, symbol, {"timeframe": timeframe, "ohlcv": ohlcv})
                 await self._bus.emit(topic, event)
             except asyncio.CancelledError:
@@ -190,13 +210,12 @@ class ExchangeConnector:
                 raise
             except Exception as exc:
                 await self._bus.emit(error_topic, str(exc))
-                await asyncio.sleep(1)
+            await asyncio.sleep(10)
 
     @staticmethod
     def _order_event_name(status: str) -> str:
-        return {"closed": "filled", "canceled": "canceled", "rejected": "rejected"}.get(
-            status, "created"
-        )
+        et = _ORDER_STATUS_MAP.get(status)
+        return et.value if et else "unknown"
 
     # ============================================================
     # command 处理：下单 / 撤单
@@ -209,6 +228,8 @@ class ExchangeConnector:
         market, symbol, cmd_type, channel_id = _parse_command_topic(topic)
         sym_compact = symbol.replace("/", "")
         error_topic = f"{market}/error/{sym_compact}/order"
+        logger.info("收到命令: topic=%s market=%s symbol=%s cmd=%s ch=%s",
+                     topic, market, symbol, cmd_type, channel_id[:8])
         try:
             if cmd_type == "create_order":
                 raw = await self._exchange.create_order(
@@ -224,8 +245,12 @@ class ExchangeConnector:
                 order_id = str(raw.get("id", ""))
                 if order_id:
                     self._order_channel[order_id] = channel_id
-                # 根据交易所实际返回状态发事件（非硬编码 CREATED）
+                # 市价单即时成交，先发 CREATED 让 OrderAcceptedHandler 乐观更新持仓
                 status = raw.get("status", "open")
+                if status == "closed":
+                    created = Event(EventType.ORDER_CREATED, symbol, raw)
+                    await self._bus.emit(f"{market}/order/{symbol}/{channel_id}/created", created)
+                # 再发实际状态回报
                 event_type = _ORDER_STATUS_MAP.get(status, EventType.ORDER_CREATED)
                 event_name = self._order_event_name(status)
                 event = Event(event_type, symbol, raw)
@@ -235,6 +260,8 @@ class ExchangeConnector:
                 event = Event(EventType.ORDER_CANCELED, symbol, raw)
                 await self._bus.emit(f"{market}/order/{symbol}/{channel_id}/canceled", event)
         except Exception as exc:
+            logger.error("命令执行失败: cmd=%s symbol=%s ch=%s err=%s",
+                         cmd_type, symbol, channel_id[:8], exc)
             await self._bus.emit(error_topic, str(exc))
 
     # ============================================================

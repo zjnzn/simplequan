@@ -1,8 +1,7 @@
 """ExchangePort —— 交易所端口，定义交易所原始能力。
 
-实现类可以是：
-  - CcxtExchange: 封装 CCXT 库，对接真实交易所
-  - SimulatedExchange: 模拟交易所，用于测试
+实现类：
+  - CcxtExchange: 封装 ccxt.pro，对接真实交易所 / testnet
 """
 from __future__ import annotations
 
@@ -57,11 +56,19 @@ class ExchangePort(Protocol):
         ...
 
     # ============================================================
+    # 市场数据 (REST)
+    # ============================================================
+
+    async def fetch_ohlcv(self, symbol: str, timeframe: str, since: int | None = None, limit: int = 500) -> list:
+        """获取历史 K 线数据（用于预热）。"""
+        ...
+
+    # ============================================================
     # 数据流 (WebSocket)
     # ============================================================
 
     async def watch_ohlcv(self, symbol: str, timeframe: str) -> list:
-        """订阅 K 线数据。"""
+        """订阅实时 K 线数据。"""
         ...
 
     async def watch_order_book(self, symbol: str) -> dict:

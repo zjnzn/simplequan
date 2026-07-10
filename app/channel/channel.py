@@ -18,8 +18,11 @@ Topic 协议：
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from core.domain.account import SubAccount
 from core.domain.command import Command, CommandType
@@ -140,6 +143,7 @@ class SymbolChannel:
     async def _publish_command(self, command: Command) -> None:
         """指令穿过整条 pipeline、到达 head 之后，发布到 EventBus。"""
         topic = f"command/{self.market_type}/{self.symbol.symbol}/{command.type.value}/{self.id}"
+        logger.debug("发布命令到总线: topic=%s", topic)
         await self._bus.emit(topic, command.payload)
 
     # ---------------- 生命周期 ----------------

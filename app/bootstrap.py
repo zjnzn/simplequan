@@ -127,7 +127,8 @@ class Bootstrap:
         # 1. 创建 Channel 维度 SubAccount
         sub = None
         if self._master:
-            allocated = self._master.balance.total * Decimal(str(cfg.allocation))
+            same_symbol = len(self._app_config.by_symbol(symbol.symbol))
+            allocated = self._master.balance.total * Decimal(str(cfg.allocation)) / same_symbol
             master_pos = self._master.get_position(symbol.symbol)
             # 深拷贝 Position：master 可能已持仓，共享引用会导致多 channel 持仓串台
             sub = SubAccount(

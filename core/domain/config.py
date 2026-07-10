@@ -85,15 +85,17 @@ class ChannelConfig:
 class ExchangeConfig:
     """交易所连接配置。
 
-    mode: simulated=纯内存模拟；hybrid=真实行情+虚拟撮合。
-    name: ccxt.pro 交易所 id（如 binance），hybrid 模式下使用。
+    mode: ccxt=ccxt.pro（spot testnet / 实盘）。
+    name: ccxt.pro 交易所 id（如 binance）。
     proxy: 本地代理地址（如 http://127.0.0.1:7897），空表示直连。
+    sandbox: True=使用 testnet，False=实盘。
     """
     api_key: str = ""
     api_secret: str = ""
-    mode: str = "simulated"
+    mode: str = "ccxt"
     name: str = "binance"
     proxy: str = ""
+    sandbox: bool = True
 
 
 @dataclass(slots=True)
@@ -171,9 +173,10 @@ def load_config(path: str | Path = "conf/config.yaml") -> AppConfig:
     exchange = ExchangeConfig(
         api_key=ex_data.get("api_key", ""),
         api_secret=ex_data.get("api_secret", ""),
-        mode=ex_data.get("mode", "simulated"),
+        mode=ex_data.get("mode", "ccxt"),
         name=ex_data.get("name", "binance"),
         proxy=ex_data.get("proxy", ""),
+        sandbox=ex_data.get("sandbox", True),
     )
 
     strategies = _parse_strategies(data.get("strategies"))

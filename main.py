@@ -2,9 +2,8 @@ import asyncio
 import logging
 
 from app.eventbus.eventbus import ChannelEventBus
+from app.exchange.ccxt_exchange import CcxtExchange
 from app.exchange.connector import ExchangeConnector
-from app.exchange.simulated import SimulatedExchange
-from app.exchange.hybrid import HybridExchange
 from app.handler.data_parse import DataParseHandler
 from app.handler.data_process import DataProcessHandler
 from app.handler.order_accepted import OrderAcceptedHandler
@@ -34,7 +33,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 
 def build_default_pre_pipeline() -> RiskPipeline:
-    """构建默认 Pre 风控管道。"""
+    """构建默认 Pre 风控管道（仅过滤，不做数据加工）。"""
     return RiskPipeline([
         SignalStrengthMiddleware(min_strength=0.03),
         DailyLossMiddleware(),
@@ -48,8 +47,8 @@ def build_default_post_pipeline() -> RiskPipeline:
         MinNotionalMiddleware(),
         PositionToleranceMiddleware(tolerance=0.15),
         AmountCheckMiddleware(),
-        MaxLeverageMiddleware(),
-        PerOrderRatioMiddleware(),
+        # MaxLeverageMiddleware(),  # 注：杠杆已在 PositionCalc 绑定交易所实际值，此处重复检查会拒绝 demo(50x) < config(20x)
+        # PerOrderRatioMiddleware(),
     ])
 
 class TradingChannelInitializer(ChannelInitializer):
@@ -80,12 +79,9 @@ class TradingChannelInitializer(ChannelInitializer):
 async def main() -> None:
     cfg = load_config()
     bus = ChannelEventBus()
-    if cfg.exchange.mode == "hybrid":
-        exchange = HybridExchange(cfg.exchange, cfg)
-        print(f"交易所模式: hybrid（真实行情+虚拟撮合）交易所={cfg.exchange.name}")
-    else:
-        exchange = SimulatedExchange(cfg.exchange, cfg)
-        print("交易所模式: simulated（纯内存模拟）")
+    exchange = CcxtExchange(cfg.exchange)
+    sandbox_tag = "sandbox" if cfg.exchange.sandbox else "live"
+    print(f"交易所: {cfg.exchange.name} ({sandbox_tag}) proxy={'on' if cfg.exchange.proxy else 'off'}")
     connector = ExchangeConnector(exchange, bus)
 
     # 一次性加载所有策略/指标类到全局注册表（无状态模板，全局共享）

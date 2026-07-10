@@ -7,6 +7,7 @@ handler 内部事件（信号/指标）走 pipeline fire_channel_read 不上 bus
 from __future__ import annotations
 
 import logging
+import time
 from collections import deque
 from typing import Any
 
@@ -46,7 +47,6 @@ class Collector:
 
     async def _on_master(self, topic: str, master: Any) -> None:
         """记录 master 历史快照，用于监控面板回溯。"""
-        import time
         snap = {
             "ts": int(time.time()),
             "account_id": getattr(master, "account_id", ""),

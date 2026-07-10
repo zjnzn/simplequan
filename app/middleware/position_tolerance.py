@@ -32,6 +32,7 @@ class PositionToleranceMiddleware:
         order_amount = float(command_payload.get("amount", 0))
 
         if order_side != pos.side:
+            # 反向操作(平仓/止损/反手)，不应因微调阈值而拒绝
             return RiskResult.approve()
 
         current_qty = float(pos.qty)

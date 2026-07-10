@@ -57,10 +57,9 @@ class PositionCalcHandler(Handler):
         pos.update_unrealized_pnl(Decimal(str(price)))
 
         allocated = Decimal(str(acc.allocated_balance))
-        position_pct = Decimal(str(ctx.channel.config.allocation))
-        adjusted_pct = position_pct * Decimal(str(signal.strength))
+        strength = Decimal(str(signal.strength))
         leverage = Decimal(str(getattr(acc.leverage_config, "leverage", 1) or 1))
-        notional = allocated * adjusted_pct * leverage
+        notional = allocated * strength * leverage
         target_qty = notional / price
 
         # 当前持仓
@@ -76,6 +75,11 @@ class PositionCalcHandler(Handler):
         target_signed = target_qty if signal.value > 0 else -target_qty
 
         delta = target_signed - current_qty
+        # 方向反转时只平仓不翻仓：翻仓需要第二个信号来反向开仓
+        if current_qty > 0 and delta < -current_qty:
+            delta = -current_qty
+        elif current_qty < 0 and delta > -current_qty:
+            delta = -current_qty
         if abs(delta) < Decimal("0.000001"):
             return
 

@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Quanquan Monitor</title>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
 <style>
   :root {
     --bg: #0f1419;
@@ -157,6 +158,7 @@
   <h1><span class="dot"></span>Quanquan Monitor</h1>
   <div style="display:flex;align-items:center;gap:12px">
     <button class="btn" onclick="exportChannelsCSV()" title="导出所有 channel 汇总为 CSV">导出 Channels</button>
+    <button class="btn" onclick="exportAllCSV()" id="btnExportAll" title="导出所有 channel 的全部历史数据为 ZIP">导出全部 (ZIP)</button>
     <div class="meta" id="updateTime">-</div>
   </div>
 </div>
@@ -443,6 +445,94 @@ function exportChannelsCSV() {
     rows.push([c.channel_id, c.symbol, c.interval, mi.market||c.market_type||"", c.leverage, c.allocated_balance, c.daily_pnl, pos.side||"", pos.qty||"0", pos.avg_price||"0", mi.amount_precision||"", mi.price_precision||"", mi.taker_fee||"", mi.contract_size||"", mi.settle||"", mi.is_linear?"Y":"N"]);
   });
   downloadCSV("channels.csv", rows);
+}
+
+/* ---- 一键导出全部为 ZIP ---- */
+function safeName(s) {
+  return String(s == null ? "" : s).replace(/[\/\\:*?"<>|]/g, "_");
+}
+function pad2(n) { return String(n).padStart(2, "0"); }
+function rowsToCSV(rows) {
+  return "﻿" + rows.map(r => r.map(quoteCSV).join(",")).join("\n");
+}
+function folderName(c) {
+  return `${safeName(c.symbol)}@${safeName(c.interval)}_${safeName(c.instance_id)}`;
+}
+function rowsFor(kind, data) {
+  if (kind === "signals") {
+    return [["时间","方向","强度","值","原因"]].concat(
+      data.map(s => [ts(s.timestamp), s.direction, s.strength, s.value, s.reason])
+    );
+  }
+  if (kind === "orders") {
+    return [["订单号","事件","方向","状态","数量","成交量","均价"]].concat(
+      data.map(o => [o.order_id, o.event||"", o.side||"", o.state||"", o.qty, o.filled_qty, o.avg_price])
+    );
+  }
+  if (kind === "klines") {
+    return [["时间","开","高","低","收","量"]].concat(
+      data.map(k => [ts(k.timestamp), k.open, k.high, k.low, k.close, k.volume])
+    );
+  }
+  if (kind === "indicators") {
+    return [["时间","指标"]].concat(
+      data.map(d => [ts(d.timestamp), Object.entries(d.indicators||{}).map(([k,v])=>`${k}=${v}`).join("  ")])
+    );
+  }
+  return [];
+}
+
+async function exportAllCSV() {
+  const btn = document.getElementById("btnExportAll");
+  if (!channels.length) { alert("没有 channel 可导出"); return; }
+  const origText = btn.textContent;
+  btn.disabled = true;
+
+  const kinds = ["signals", "orders", "klines", "indicators"];
+  const tasks = [];
+  for (const c of channels) {
+    for (const k of kinds) {
+      tasks.push({
+        c, k,
+        promise: get(`/channels/${c.instance_id}/${k}?limit=500`).catch(() => null)
+      });
+    }
+  }
+
+  let done = 0;
+  const settled = await Promise.all(tasks.map(async t => {
+    t.data = await t.promise;
+    done++;
+    btn.textContent = `导出中 ${done}/${tasks.length}`;
+    return t;
+  }));
+
+  const zip = new JSZip();
+  const failures = [];
+  for (const r of settled) {
+    if (!r.data) { failures.push(`${folderName(r.c)}/${r.k}`); continue; }
+    const folder = zip.folder(folderName(r.c));
+    folder.file(`${r.k}.csv`, rowsToCSV(rowsFor(r.k, r.data)));
+  }
+
+  const readme =
+    `Quanquan 导出\n生成时间: ${new Date().toISOString()}\n` +
+    `Channels: ${channels.length}\n` +
+    `失败项: ${failures.length ? failures.join(", ") : "无"}\n`;
+  zip.file("README.txt", readme);
+
+  const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
+  const d = new Date();
+  const stamp = `${d.getFullYear()}${pad2(d.getMonth()+1)}${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `quanquan_export_${stamp}.zip`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+
+  btn.disabled = false;
+  btn.textContent = origText;
+  if (failures.length) alert(`已导出,但以下 ${failures.length} 项失败(已跳过):\n${failures.join("\n")}`);
 }
 
 loadOverview();

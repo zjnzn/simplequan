@@ -21,7 +21,16 @@ class PerOrderRatioMiddleware:
             return RiskResult.approve()
 
         command_payload = payload.payload if hasattr(payload, "payload") else {}
-        notional = float(command_payload.get("notional", 0))
+        notional = command_payload.get("notional")
+        if notional is not None:
+            notional = float(notional)
+        else:
+            amount = float(command_payload.get("amount", 0))
+            close_price = float(command_payload.get("close_price", 0))
+            if close_price > 0:
+                notional = float(amount * close_price)
+            else:
+                return RiskResult.approve()
 
         if notional <= 0:
             return RiskResult.approve()
