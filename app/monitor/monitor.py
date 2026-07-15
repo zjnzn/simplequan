@@ -7,9 +7,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import pandas as pd
+
 from app.monitor.collector import Collector
 
 logger = logging.getLogger(__name__)
+
+OHLCV_COLUMNS = {"timestamp", "open", "high", "low", "close", "volume", "interval"}
 
 
 class Monitor:
@@ -26,7 +30,6 @@ class Monitor:
     def start(self) -> None:
         """启动 collector 订阅 + http server（异步）。"""
         self._collector.bind()
-        # 延迟导入避免循环依赖
         from app.monitor.server import build_app, serve
         app = build_app(self)
         self._server_task = asyncio_create_task(serve(app, self._host, self._port))
@@ -101,6 +104,20 @@ class Monitor:
             return None
         sub = ch.sub_account
         rec = self._collector.records.get(ch.config.channel_id)
+
+        # 从 DataFrame 提取当前指标
+        current_indicators = {}
+        for iv, df in ch.market.bars.items():
+            if len(df) > 0:
+                last_row = df.iloc[-1]
+                inds = {}
+                for col in df.columns:
+                    if col not in OHLCV_COLUMNS and col not in ("signal_value", "signal_strength", "signal_reason"):
+                        val = last_row[col]
+                        if pd.notna(val):
+                            inds[col] = str(val)
+                current_indicators[iv] = inds
+
         return {
             "channel_id": ch.config.channel_id,
             "instance_id": ch.id,
@@ -122,11 +139,8 @@ class Monitor:
                 },
             } if sub else None,
             "current_signal": self._signal_dict(ch.market.current_signal),
-            "current_indicators": {
-                iv: {k: str(v) for k, v in d.items()}
-                for iv, d in ch.market.indicators.items()
-            },
-            "bars_count": {iv: len(dq) for iv, dq in ch.market.bars.items()},
+            "current_indicators": current_indicators,
+            "bars_count": {iv: len(df) for iv, df in ch.market.bars.items()},
             "history": {
                 "klines": len(rec.klines) if rec else 0,
                 "indicators": len(rec.indicators) if rec else 0,
@@ -199,12 +213,9 @@ class Monitor:
     # ============================================================
 
     def _find_channel(self, cid: str):
-        """按 channel_id 或 instance_id 前缀找 channel。"""
-        # 先按 channel_id (symbol@interval)
         for ch in self._bootstrap._channels.values():
             if ch.config.channel_id == cid:
                 return ch
-        # 再按 instance_id 前缀（uuid 前 8 位）
         for ch in self._bootstrap._channels.values():
             if ch.id.startswith(cid) or ch.id[:8] == cid:
                 return ch
@@ -224,19 +235,24 @@ class Monitor:
         """序列化历史项为 JSON 可序列化结构。"""
         if isinstance(item, dict):
             return item
-        # Bar 对象
-        if hasattr(item, "close") and hasattr(item, "interval"):
-            return {
-                "symbol": item.symbol,
-                "interval": item.interval,
-                "open": str(item.open),
-                "high": str(item.high),
-                "low": str(item.low),
-                "close": str(item.close),
-                "volume": str(item.volume),
-                "timestamp": item.timestamp,
-            }
+        if isinstance(item, pd.Series):
+            return self._sanitize(item.to_dict())
         return str(item)
+
+    def _sanitize(self, d: dict) -> dict:
+        """清理 dict 中的非 JSON 值。"""
+        result = {}
+        for k, v in d.items():
+            if isinstance(v, float):
+                if pd.isna(v):
+                    result[k] = None
+                else:
+                    result[k] = v
+            elif isinstance(v, pd.Timestamp):
+                result[k] = int(v.timestamp())
+            else:
+                result[k] = str(v) if v is not None else None
+        return result
 
 
 def asyncio_create_task(coro):

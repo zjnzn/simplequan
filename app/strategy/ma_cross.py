@@ -19,7 +19,7 @@ class MaCrossStrategy:
     """
 
     name = "ma_cross_over"
-    version = "3.0.0"
+    version = "4.0.0"
 
     def required_indicators(self, params: dict) -> list[str]:
         fast = params.get("fast", 5)
@@ -27,20 +27,22 @@ class MaCrossStrategy:
         source = params.get("source", "ma")
         return [f"{source}_{fast}", f"{source}_{slow}"]
 
-    async def on_bar(self, bar, ctx, params: dict) -> Signal | None:
+    async def on_bar(self, row: dict, ctx, params: dict) -> Signal | None:
         fast = params.get("fast", 5)
         slow = params.get("slow", 20)
         source = params.get("source", "ma")
         sensitivity = params.get("sensitivity", 0.002)
-        indicators = ctx.channel.market.indicators.get(bar.interval, {})
-        v_fast = indicators.get(f"{source}_{fast}")
-        v_slow = indicators.get(f"{source}_{slow}")
+
+        v_fast = row.get(f"{source}_{fast}")
+        v_slow = row.get(f"{source}_{slow}")
         if v_fast is None or v_slow is None:
             return None
 
         f, s = float(v_fast), float(v_slow)
-        price = float(bar.close)
-        # 快慢线间距归一化到 [-1, 1]
+        price = float(row.get("close", 0))
+        if price == 0:
+            return None
+
         raw = (f - s) / (price * sensitivity)
         value = Signal._clamp(raw)
-        return Signal(value, "MA_SPREAD" if value > 0 else "MA_SPREAD")
+        return Signal(value, "MA_SPREAD")

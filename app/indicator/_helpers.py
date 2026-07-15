@@ -1,123 +1,78 @@
-"""指标计算通用辅助函数（纯函数、无状态）。"""
+"""指标计算通用辅助函数（已废弃）。
+
+这些函数已被 pandas 向量化操作替代：
+  sma  → df["close"].rolling(period).mean()
+  ema  → df["close"].ewm(span=period, adjust=False).mean()
+  rma  → df["close"].ewm(alpha=1/period, adjust=False).mean()
+  highest → df["close"].rolling(period).max()
+  lowest  → df["close"].rolling(period).min()
+  stdev   → df["close"].rolling(period).std()
+
+保留仅供向后兼容，新代码请直接使用 pd 向量化操作。
+"""
 from __future__ import annotations
 
+import warnings
 from decimal import Decimal
 from typing import Sequence
 
+import pandas as pd
+
 
 def _to_floats(values: Sequence[Decimal]) -> list[float]:
-    """Decimal 序列 → float 列表。"""
     return [float(v) for v in values]
 
 
 def sma(values: Sequence[float], period: int) -> list[float]:
-    """简单移动平均。对齐 project_refactored rolling(min_periods=period) 行为。
-
-    窗口包含 NaN 时返回 NaN，但 NaN 离开窗口后能正常恢复。
-    """
-    result: list[float] = []
-    window: list[float] = []
-    for v in values:
-        window.append(v)
-        if len(window) > period:
-            window.pop(0)
-        if len(window) == period:
-            # 仅当窗口内全部值有效时才计算均值
-            if all(x == x for x in window):
-                result.append(sum(window) / period)
-            else:
-                result.append(float("nan"))
-        else:
-            result.append(float("nan"))
-    return result
+    warnings.warn("sma is deprecated, use pd.Series.rolling().mean()", DeprecationWarning, stacklevel=2)
+    s = pd.Series(values)
+    return s.rolling(period, min_periods=period).mean().tolist()
 
 
 def ema(values: Sequence[float], period: int) -> list[float]:
-    """指数移动平均 (alpha=2/(period+1))。对齐 pandas ewm(span=period, adjust=False)。"""
-    result: list[float] = []
-    alpha = 2.0 / (period + 1)
-    prev = float("nan")
-    for v in values:
-        if prev != prev:  # NaN → 初始化为当前值
-            prev = v
-        elif v == v:  # v 非 NaN 时才更新，NaN 值保持 prev
-            prev = alpha * v + (1 - alpha) * prev
-        result.append(prev)
-    return result
+    warnings.warn("ema is deprecated, use pd.Series.ewm().mean()", DeprecationWarning, stacklevel=2)
+    s = pd.Series(values)
+    return s.ewm(span=period, adjust=False).mean().tolist()
 
 
 def rma(values: Sequence[float], period: int) -> list[float]:
-    """Wilder 平滑均线 (alpha=1/period)。对齐 pandas ewm(alpha=1/period, adjust=False)。"""
-    result: list[float] = []
-    alpha = 1.0 / period
-    prev = float("nan")
-    for v in values:
-        if prev != prev:  # NaN → 初始化为当前值
-            prev = v
-        elif v == v:  # v 非 NaN 时才更新，NaN 值保持 prev
-            prev = alpha * v + (1 - alpha) * prev
-        result.append(prev)
-    return result
+    warnings.warn("rma is deprecated, use pd.Series.ewm().mean()", DeprecationWarning, stacklevel=2)
+    s = pd.Series(values)
+    return s.ewm(alpha=1.0 / period, adjust=False).mean().tolist()
 
 
 def highest(values: Sequence[float], period: int) -> list[float]:
-    """滚动周期最大值。"""
-    result: list[float] = []
-    window: list[float] = []
-    for v in values:
-        window.append(v)
-        if len(window) > period:
-            window.pop(0)
-        result.append(max(window) if len(window) == period else float("nan"))
-    return result
+    warnings.warn("highest is deprecated, use pd.Series.rolling().max()", DeprecationWarning, stacklevel=2)
+    s = pd.Series(values)
+    return s.rolling(period, min_periods=period).max().tolist()
 
 
 def lowest(values: Sequence[float], period: int) -> list[float]:
-    """滚动周期最小值。"""
-    result: list[float] = []
-    window: list[float] = []
-    for v in values:
-        window.append(v)
-        if len(window) > period:
-            window.pop(0)
-        result.append(min(window) if len(window) == period else float("nan"))
-    return result
+    warnings.warn("lowest is deprecated, use pd.Series.rolling().min()", DeprecationWarning, stacklevel=2)
+    s = pd.Series(values)
+    return s.rolling(period, min_periods=period).min().tolist()
 
 
 def stdev(values: Sequence[float], period: int) -> list[float]:
-    """滚动标准差 (ddof=0)。"""
-    result: list[float] = []
-    window: list[float] = []
-    for v in values:
-        window.append(v)
-        if len(window) > period:
-            window.pop(0)
-        if len(window) == period:
-            mean = sum(window) / period
-            variance = sum((x - mean) ** 2 for x in window) / period
-            result.append(variance ** 0.5)
-        else:
-            result.append(float("nan"))
-    return result
+    warnings.warn("stdev is deprecated, use pd.Series.rolling().std()", DeprecationWarning, stacklevel=2)
+    s = pd.Series(values)
+    return s.rolling(period, min_periods=period).std().tolist()
 
 
 def last_valid(sequence: list[float], default: float = 0.0) -> float:
-    """取最后一个非 NaN 值。"""
     for v in reversed(sequence):
-        if v == v:  # not NaN
+        if v == v:
             return v
     return default
 
 
 def _d(val: float | None) -> Decimal | None:
-    """float → Decimal，NaN → None。"""
     if val is None or val != val:
         return None
     return Decimal(str(val))
 
 
 def _ds(val: float) -> Decimal:
-    """float → Decimal，NaN → Decimal('NaN')。"""
     if val != val:
         return Decimal("NaN")
     return Decimal(str(val))

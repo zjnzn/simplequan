@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from collections import deque
-from decimal import Decimal
+import pandas as pd
 
 
 class MaCalculator:
@@ -10,18 +9,19 @@ class MaCalculator:
     params:
         periods: MA 周期列表，默认 [5, 20]
     """
+
     name = "ma"
-    version = "1.0.0"
+    version = "2.0.0"
 
     def output_keys(self, params: dict) -> list[str]:
         periods = params.get("periods", [5, 20])
         return [f"ma_{p}" for p in periods]
 
-    def compute(self, bars: deque, params: dict) -> dict[str, Decimal]:
+    def compute(self, df: pd.DataFrame, params: dict) -> dict[str, float]:
         periods = params.get("periods", [5, 20])
         result = {}
-        closes = [b.close for b in bars]
-        for period in periods:
-            if len(closes) >= period:
-                result[f"ma_{period}"] = sum(closes[-period:], Decimal(0)) / period
+        closes = df["close"]
+        for p in periods:
+            if len(closes) >= p:
+                result[f"ma_{p}"] = float(closes.rolling(p).mean().iloc[-1])
         return result

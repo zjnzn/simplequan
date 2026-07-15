@@ -6,7 +6,6 @@ from core.domain.signal import Signal
 from core.ports.context import Context
 from core.ports.handler import Handler
 
-# 重新导出 Signal
 __all__ = ["Signal", "SignalHandler"]
 
 logger = logging.getLogger(__name__)
@@ -15,9 +14,7 @@ logger = logging.getLogger(__name__)
 class SignalHandler(Handler):
     """入站：策略调度器 —— 从 ctx.channel.config 取策略配置，注入 params 后调用 on_bar。
 
-    无状态模板模式：注册表缓存策略类对象，handler 调用时注入 channel 的 params，
-    默认值由策略类内 params.get(k, 默认) 兜底。
-
+    接收 row dict（含 OHLCV + 指标列），策略直接从 row 读取指标值。
     实例缓存：策略实例按 channel_id 缓存，保证 _prev_* 状态跨 bar 持续。
     """
 
@@ -28,7 +25,11 @@ class SignalHandler(Handler):
         self._strat_cache: dict[str, object] = {}
 
     async def channel_read(self, ctx: Context, event: Event) -> None:
-        bar = event.payload
+        row = event.payload
+        if not isinstance(row, dict):
+            await ctx.fire_channel_read(event)
+            return
+
         strat_cfg = ctx.channel.config.strategy
         signal = None
 
@@ -39,7 +40,7 @@ class SignalHandler(Handler):
                 strat_cls = self._registry.get(strat_cfg.name)
                 strat = strat_cls()
                 self._strat_cache[cache_key] = strat
-            result = await strat.on_bar(bar, ctx, strat_cfg.params)
+            result = await strat.on_bar(row, ctx, strat_cfg.params)
             if result and result.value != 0:
                 signal = result
         except KeyError:
@@ -51,6 +52,23 @@ class SignalHandler(Handler):
             signal = Signal(0.0, "NO_SIGNAL")
 
         ctx.channel.market.current_signal = signal
+
+        # 回写信号列到 DataFrame
+        interval = row.get("interval", "")
+        df = ctx.channel.market.bars.get(interval)
+        if df is not None and len(df) > 0:
+            idx = df.index[-1]
+            df.loc[idx, "signal_value"] = signal.value
+            df.loc[idx, "signal_strength"] = signal.strength
+            df.loc[idx, "signal_reason"] = signal.reason
+
+        # 合并信号信息到 row dict
+        enriched = {
+            **row,
+            "signal_value": signal.value,
+            "signal_strength": signal.strength,
+            "signal_reason": signal.reason,
+        }
         logger.debug("信号: %s %s 强度=%.4f 原因=%s",
                      signal.direction, event.symbol, signal.strength, signal.reason)
-        await ctx.fire_channel_read(Event(EventType.KLINE, event.symbol, signal))
+        await ctx.fire_channel_read(Event(EventType.KLINE, event.symbol, enriched))

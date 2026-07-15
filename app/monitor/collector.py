@@ -11,9 +11,13 @@ import time
 from collections import deque
 from typing import Any
 
+import pandas as pd
+
 from app.monitor.store import ChannelRecord
 
 logger = logging.getLogger(__name__)
+
+OHLCV_COLUMNS = {"timestamp", "open", "high", "low", "close", "volume", "interval"}
 
 
 class Collector:
@@ -23,9 +27,7 @@ class Collector:
         self._bootstrap = bootstrap
         self._bus = bus
         self._records: dict[str, ChannelRecord] = {}
-        # 跟踪每个 channel 已同步到前端的最新 bar timestamp，避免重复
         self._synced_ts: dict[str, int] = {}
-        # master 账户历史快照（有界 200）
         self.master_history: deque[dict[str, Any]] = deque(maxlen=200)
 
     def bind(self) -> None:
@@ -61,7 +63,7 @@ class Collector:
         """kline 到达 → 全量同步 market.bars + 快照 indicators/signal 存历史。
 
         topic: {market}/kline/{symbol}@{interval}
-        payload: Event(KLINE, symbol, Bar) 或 Event(KLINE, symbol, {timeframe, ohlcv})
+        payload: Event(KLINE, symbol, row_dict)
         """
         channel_id = self._parse_kline_topic(topic)
         if channel_id is None:
@@ -74,33 +76,36 @@ class Collector:
         interval = ch.config.interval
         rec = self.get_or_create(channel_id, symbol, interval)
 
-        # 全量同步 market.bars 中尚未同步到前端的新 bar
-        bars = ch.market.bars.get(interval)
-        if bars:
+        df = ch.market.bars.get(interval)
+        if df is not None and len(df) > 0:
             last_synced = self._synced_ts.get(channel_id, 0)
-            for bar in bars:
-                if bar.timestamp > last_synced:
-                    rec.klines.append(bar)
-                    last_synced = bar.timestamp
+            new_rows = df[df["timestamp"] > last_synced]
+            for _, row in new_rows.iterrows():
+                rec.klines.append(self._row_to_bar_dict(row))
+                last_synced = int(row["timestamp"])
             self._synced_ts[channel_id] = last_synced
 
-            # 取最新 bar 用于指标/信号时间戳
-            bar = list(bars)[-1]
+            last_row = df.iloc[-1]
+            bar_ts = int(last_row["timestamp"])
         else:
-            bar = None
+            bar_ts = 0
 
-        # 快照当前指标
-        inds = ch.market.indicators.get(interval, {})
-        rec.indicators.append({
-            "timestamp": getattr(bar, "timestamp", 0) if bar else 0,
-            "indicators": {k: str(v) for k, v in inds.items()},
-        })
+        # 快照当前指标（从最后一行的非 OHLCV 列提取）
+        if df is not None and len(df) > 0:
+            last_row = df.iloc[-1]
+            inds = {}
+            for col in df.columns:
+                if col not in OHLCV_COLUMNS and col not in ("signal_value", "signal_strength", "signal_reason"):
+                    val = last_row[col]
+                    if pd.notna(val):
+                        inds[col] = str(val)
+            rec.indicators.append({"timestamp": bar_ts, "indicators": inds})
 
         # 快照当前信号
         sig = ch.market.current_signal
         if sig is not None:
             rec.signals.append({
-                "timestamp": getattr(bar, "timestamp", 0) if bar else 0,
+                "timestamp": bar_ts,
                 "direction": sig.direction,
                 "strength": sig.strength,
                 "value": sig.value,
@@ -108,12 +113,7 @@ class Collector:
             })
 
     async def _on_order(self, topic: str, payload: Any) -> None:
-        """订单回报 → 存历史订单。
-
-        topic: {market}/order/{symbol}/{channel_uuid}/{event}
-        其中 channel_uuid 是 SymbolChannel.id（非 channel_id=symbol@interval），
-        需用 uuid 反查 channel 再映射到 record。
-        """
+        """订单回报 → 存历史订单。"""
         parts = topic.split("/")
         if len(parts) < 5:
             return
@@ -130,7 +130,6 @@ class Collector:
         oid = order.get("id") if isinstance(order, dict) else getattr(order, "order_id", "")
         snap = self._order_to_dict(order, ev_name)
 
-        # 按 order_id 去重：同订单多次回报（created→filled）只保留最新
         if oid:
             for i, old in enumerate(rec.orders):
                 if str(old.get("order_id", "")) == str(oid):
@@ -138,15 +137,26 @@ class Collector:
                     return
         rec.orders.append(snap)
 
+    def _row_to_bar_dict(self, row: pd.Series) -> dict:
+        """DataFrame 行 → Bar dict（兼容监控前端）。"""
+        return {
+            "symbol": row.get("symbol", ""),
+            "interval": row.get("interval", ""),
+            "open": str(row.get("open", "")),
+            "high": str(row.get("high", "")),
+            "low": str(row.get("low", "")),
+            "close": str(row.get("close", "")),
+            "volume": str(row.get("volume", "")),
+            "timestamp": int(row.get("timestamp", 0)),
+        }
+
     def _find_channel_by_uuid(self, uuid: str):
-        """按 SymbolChannel.id（uuid 或前缀）找 channel。"""
         for ch in self._bootstrap._channels.values():
             if ch.id == uuid or ch.id.startswith(uuid):
                 return ch
         return None
 
     def _parse_kline_topic(self, topic: str) -> str | None:
-        """{market}/kline/{symbol}@{interval} → channel_id (symbol@interval)。"""
         marker = "/kline/"
         idx = topic.find(marker)
         if idx < 0:
@@ -154,14 +164,12 @@ class Collector:
         return topic[idx + len(marker):]
 
     def _find_channel(self, channel_id: str):
-        """按 channel_id（symbol@interval）找 channel。"""
         for ch in self._bootstrap._channels.values():
             if ch.config.channel_id == channel_id:
                 return ch
         return None
 
     def _order_to_dict(self, order: Any, event: str = "") -> dict:
-        """Order 对象或 ccxt raw dict → dict 快照。"""
         if isinstance(order, dict):
             state = order.get("status", "")
             return {

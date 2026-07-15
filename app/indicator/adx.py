@@ -1,10 +1,7 @@
-"""ADX 平均趋向指数。"""
+"""ADX 平均趋向指数（pd 向量化）。"""
 from __future__ import annotations
 
-from collections import deque
-from decimal import Decimal
-
-from ._helpers import rma, _ds
+import pandas as pd
 
 
 class AdxCalculator:
@@ -15,71 +12,47 @@ class AdxCalculator:
     """
 
     name = "adx"
-    version = "1.0.0"
+    version = "2.0.0"
 
     def output_keys(self, params: dict) -> list[str]:
         return ["adx", "plus_di", "minus_di"]
 
-    def compute(self, bars: deque, params: dict) -> dict[str, Decimal]:
+    def compute(self, df: pd.DataFrame, params: dict) -> dict[str, float]:
         period = params.get("period", 14)
-        n = len(bars)
+        n = len(df)
         if n < period + 1:
             return {}
 
-        high = [float(b.high) for b in bars]
-        low = [float(b.low) for b in bars]
-        close = [float(b.close) for b in bars]
+        high, low, close = df["high"], df["low"], df["close"]
 
         # True Range
-        tr = [0.0] * n
-        for i in range(1, n):
-            tr[i] = max(
-                high[i] - low[i],
-                abs(high[i] - close[i - 1]),
-                abs(low[i] - close[i - 1]),
-            )
-        tr[0] = high[0] - low[0]
+        tr = pd.concat([
+            high - low,
+            (high - close.shift(1)).abs(),
+            (low - close.shift(1)).abs(),
+        ], axis=1).max(axis=1)
 
         # Directional Movement
-        plus_dm = [0.0] * n
-        minus_dm = [0.0] * n
-        for i in range(1, n):
-            up = high[i] - high[i - 1]
-            down = low[i - 1] - low[i]
-            if up > down and up > 0:
-                plus_dm[i] = up
-            if down > up and down > 0:
-                minus_dm[i] = down
+        up = high.diff()
+        down = -low.diff()
+        plus_dm = up.where((up > down) & (up > 0), 0.0)
+        minus_dm = down.where((down > up) & (down > 0), 0.0)
 
-        # Wilder-smoothed
-        atr_rma = rma(tr, period)
-        plus_di_rma = rma(plus_dm, period)
-        minus_di_rma = rma(minus_dm, period)
-
-        # DI
-        plus_di = [0.0] * n
-        minus_di = [0.0] * n
-        for i in range(n):
-            if atr_rma[i] == atr_rma[i] and atr_rma[i] != 0:
-                plus_di[i] = 100.0 * plus_di_rma[i] / atr_rma[i]
-                minus_di[i] = 100.0 * minus_di_rma[i] / atr_rma[i]
-            else:
-                plus_di[i] = float("nan")
-                minus_di[i] = float("nan")
+        # Wilder smoothed (ewm alpha=1/period)
+        alpha = 1.0 / period
+        atr_rma = tr.ewm(alpha=alpha, adjust=False).mean()
+        plus_di = 100.0 * plus_dm.ewm(alpha=alpha, adjust=False).mean() / atr_rma.replace(0, float("nan"))
+        minus_di = 100.0 * minus_dm.ewm(alpha=alpha, adjust=False).mean() / atr_rma.replace(0, float("nan"))
 
         # DX
-        dx = [float("nan")] * n
-        for i in range(n):
-            denom = plus_di[i] + minus_di[i]
-            if denom != denom or denom == 0:
-                continue
-            dx[i] = 100.0 * abs(plus_di[i] - minus_di[i]) / denom
+        denom = plus_di + minus_di
+        dx = 100.0 * (plus_di - minus_di).abs() / denom.replace(0, float("nan"))
 
-        # ADX = RMA of DX
-        adx = rma(dx, period)
+        # ADX = Wilder smoothed DX
+        adx = dx.ewm(alpha=alpha, adjust=False).mean()
 
         return {
-            "adx": _ds(adx[-1]),
-            "plus_di": _ds(plus_di[-1]),
-            "minus_di": _ds(minus_di[-1]),
+            "adx": float(adx.iloc[-1]) if pd.notna(adx.iloc[-1]) else float("nan"),
+            "plus_di": float(plus_di.iloc[-1]) if pd.notna(plus_di.iloc[-1]) else float("nan"),
+            "minus_di": float(minus_di.iloc[-1]) if pd.notna(minus_di.iloc[-1]) else float("nan"),
         }
