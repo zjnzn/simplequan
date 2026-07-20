@@ -4,6 +4,20 @@ set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="simplequan"
 PID_FILE="$APP_DIR/.pid"
+
+# 自动检测 Python 解释器（优先 python3 → python）
+PYTHON=""
+for cmd in python3 python; do
+    if command -v "$cmd" &>/dev/null; then
+        PYTHON="$cmd"
+        break
+    fi
+done
+if [ -z "$PYTHON" ]; then
+    echo "FATAL: 找不到 python3 或 python"
+    exit 1
+fi
+echo "使用解释器: $PYTHON ($($PYTHON --version 2>&1))"
 LOG_DIR="$APP_DIR/logs"
 LOG_FILE="$LOG_DIR/${APP_NAME}_$(date +%Y%m%d).log"
 
@@ -26,7 +40,7 @@ start() {
     fi
     echo -n "启动 $APP_NAME ... "
     cd "$APP_DIR"
-    nohup python main.py >> "$LOG_FILE" 2>&1 &
+    nohup "$PYTHON" main.py >> "$LOG_FILE" 2>&1 &
     local pid=$!
     echo "$pid" > "$PID_FILE"
     sleep 2
