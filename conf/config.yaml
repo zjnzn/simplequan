@@ -21,6 +21,10 @@ indicators:
     module: app.indicator.cl_indicators.AutocorrCalculator
   bollinger:
     module: app.indicator.cl_indicators.BollingerCalculator
+  span:
+    module: app.indicator.cl_indicators.SpanCalculator
+  vol_ratio:
+    module: app.indicator.cl_indicators.VolRatioCalculator
 
 exchange:
   mode: ccxt
@@ -63,12 +67,12 @@ channel:
           indicators:
             - name: dmi
               params: { period: 14 }
-            - name: kdj
-              params: { n: 9, k: 3, d: 3 }
-            - name: dc
+            - name: span
               params: { period: 20 }
             - name: bollinger
               params: { period: 20, num_std: 2.0 }
+            - name: vol_ratio
+              params: { period: 20 }
             - name: atr
               params: { period: 14 }
         risk_pre:  { daily_loss_limit: 500, max_drawdown: 0.08 }

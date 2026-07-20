@@ -179,6 +179,26 @@ def _add_keltner(df: pd.DataFrame, period: int = 20, atr_period: int = 10,
     return df
 
 
+def _add_vol_ratio(df: pd.DataFrame, period: int = 20) -> pd.DataFrame:
+    volume = df["volume"]
+    vol_sma = volume.rolling(window=period).mean()
+    df = df.copy()
+    df["vol_ratio"] = (volume / (vol_sma + 1e-10)).fillna(1.0)
+    return df
+
+
+def _add_span(df: pd.DataFrame, period: int = 20) -> pd.DataFrame:
+    close = df["close"]
+    ret = close.pct_change()
+    rolling_median = ret.rolling(window=period).median()
+    rolling_mad = (ret - rolling_median).abs().rolling(window=period).median()
+    span = (ret - rolling_median) / (rolling_mad * 1.4826 + 1e-10)
+    span_smooth = span.ewm(span=period // 2, adjust=False).mean()
+    df = df.copy()
+    df["span"] = np.clip(span_smooth.fillna(0) / 3.0, -1.0, 1.0)
+    return df
+
+
 # ── Indicator 协议类 ──
 
 
@@ -400,3 +420,35 @@ class KeltnerCalculator:
         if "bb_kc_ratio" in result.columns:
             out["bb_kc_ratio"] = float(last["bb_kc_ratio"])
         return out
+
+
+class VolRatioCalculator:
+    name = "vol_ratio"
+    version = "1.0.0"
+
+    def output_keys(self, params: dict) -> list[str]:
+        return ["vol_ratio"]
+
+    def compute(self, df: pd.DataFrame, params: dict) -> dict[str, float]:
+        period = params.get("period", 20)
+        if len(df) < period + 1:
+            return {}
+        result = _add_vol_ratio(df, period)
+        df["vol_ratio"] = result["vol_ratio"].values
+        return {"vol_ratio": float(result["vol_ratio"].iloc[-1])}
+
+
+class SpanCalculator:
+    name = "span"
+    version = "1.0.0"
+
+    def output_keys(self, params: dict) -> list[str]:
+        return ["span"]
+
+    def compute(self, df: pd.DataFrame, params: dict) -> dict[str, float]:
+        period = params.get("period", 20)
+        if len(df) < period + 1:
+            return {}
+        result = _add_span(df, period)
+        df["span"] = result["span"].values
+        return {"span": float(result["span"].iloc[-1])}
