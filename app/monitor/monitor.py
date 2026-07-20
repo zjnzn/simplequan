@@ -229,6 +229,7 @@ class Monitor:
             "strength": sig.strength,
             "value": sig.value,
             "reason": sig.reason,
+            "signal_type": sig.signal_type,
         }
 
     def _serialize(self, item: Any) -> Any:

@@ -6,6 +6,7 @@ from app.exchange.ccxt_exchange import CcxtExchange
 from app.exchange.connector import ExchangeConnector
 from app.handler.data_parse import DataParseHandler
 from app.handler.data_process import DataProcessHandler
+from app.handler.market_regime import MarketRegimeHandler
 from app.handler.order_accepted import OrderAcceptedHandler
 from app.handler.order_encode import OrderEncodeHandler
 from app.handler.order_result import OrderResultHandler
@@ -67,6 +68,7 @@ class TradingChannelInitializer(ChannelInitializer):
     def init_channel(self, pipeline: Pipeline) -> None:
         pipeline.add_last("DataParse", DataParseHandler())
         pipeline.add_last("DataProcess", DataProcessHandler(self._indicator_registry))
+        pipeline.add_last("MarketRegime", MarketRegimeHandler())
         pipeline.add_last("Signal", SignalHandler(self._strategy_registry))
         pipeline.add_last("RiskPre", RiskPreCheckHandler(build_default_pre_pipeline()))
         pipeline.add_last("PositionCalc", PositionCalcHandler())

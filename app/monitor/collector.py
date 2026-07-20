@@ -110,6 +110,7 @@ class Collector:
                 "strength": sig.strength,
                 "value": sig.value,
                 "reason": sig.reason,
+                "signal_type": sig.signal_type,
             })
 
     async def _on_order(self, topic: str, payload: Any) -> None:

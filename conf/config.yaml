@@ -1,19 +1,32 @@
 strategies:
-  ma_cross_over:
-    module: app.strategy.ma_cross.MaCrossStrategy
+  trend_1h:
+    module: app.strategy.trend_1h.Trend1hStrategy
+  range_15m:
+    module: app.strategy.range_15m.Range15mStrategy
 
 indicators:
-  ma:
-    module: app.indicator.ma.MaCalculator
+  dmi:
+    module: app.indicator.cl_indicators.DmiCalculator
   adx:
-    module: app.indicator.adx.AdxCalculator
-
+    module: app.indicator.cl_indicators.AdxCalculator
+  pm:
+    module: app.indicator.cl_indicators.PmCalculator
+  kdj:
+    module: app.indicator.cl_indicators.KdjCalculator
+  dc:
+    module: app.indicator.cl_indicators.DcCalculator
+  atr:
+    module: app.indicator.cl_indicators.AtrCalculator
+  autocorr:
+    module: app.indicator.cl_indicators.AutocorrCalculator
+  bollinger:
+    module: app.indicator.cl_indicators.BollingerCalculator
 
 exchange:
-  mode: ccxt               # ccxt=ccxt.pro (spot testnet / 实盘)
+  mode: ccxt
   name: binance
-  proxy: ""                 # 直连，无需代理
-  sandbox: true             # true=spot testnet, false=实盘
+  proxy: ""
+  sandbox: true
   api_key: "hEgpUwEBaNcUbS2bJEh3vhRKeu1CKfQN4Y5flCLVPKU2CE1BoVhKXZxiQDjrPJ5Z"
   api_secret: "RkicnxgvRd9UPUJoj7bKEJaY4iPMNuDqJgnBE4iZqMiVLVMC7KIjOXziRCNRRpYQ"
 
@@ -22,14 +35,41 @@ channel:
     market: spot
     allocation: 0.3
     intervals:
-      1m:
+      1h:
         strategy:
-          name: ma_cross_over
-          params: { fast: 5, slow: 20 }
+          name: trend_1h
+          params: {}
           indicators:
-            - name: ma
-              params: { periods: [5, 20] }
+            - name: dmi
+              params: { period: 14 }
             - name: adx
+              params: { period: 14 }
+            - name: pm
+              params: { short: 3, mid: 10, long: 30 }
+            - name: kdj
+              params: { n: 9, k: 3, d: 3 }
+            - name: dc
+              params: { period: 20 }
+            - name: atr
+              params: { period: 14 }
+            - name: autocorr
+              params: { period: 20 }
+        risk_pre:  { daily_loss_limit: 500, max_drawdown: 0.08 }
+        risk_post: { max_per_order_ratio: 0.1, max_leverage: 20 }
+      15m:
+        strategy:
+          name: range_15m
+          params: {}
+          indicators:
+            - name: dmi
+              params: { period: 14 }
+            - name: kdj
+              params: { n: 9, k: 3, d: 3 }
+            - name: dc
+              params: { period: 20 }
+            - name: bollinger
+              params: { period: 20, num_std: 2.0 }
+            - name: atr
               params: { period: 14 }
         risk_pre:  { daily_loss_limit: 500, max_drawdown: 0.08 }
         risk_post: { max_per_order_ratio: 0.1, max_leverage: 20 }

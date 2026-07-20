@@ -7,6 +7,7 @@ class Signal:
 
     value: float     # [-1, +1]，正=做多，负=做空，0=观望
     reason: str
+    signal_type: str = "entry"  # "entry" | "exit"
 
     @staticmethod
     def _clamp(v: float) -> float:
@@ -26,3 +27,7 @@ class Signal:
     def strength(self) -> float:
         """信号强度绝对值 [0, 1]。"""
         return abs(self.value)
+
+    @property
+    def is_exit(self) -> bool:
+        return self.signal_type == "exit"

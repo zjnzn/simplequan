@@ -10,12 +10,10 @@ logger = logging.getLogger(__name__)
 
 
 class PositionCalcHandler(Handler):
-    """入站：row dict (signal_value/close等) → 目标仓位差值 → 下单。
+    """入站：row dict → 开仓/平仓。
 
-    单一职责：仅做仓位计算，不做信号过滤（过滤交由 Risk 层）。
-    信号强度驱动仓位大小：
-    - LONG (value > 0)：目标 = +position_pct * strength * balance
-    - SHORT (value < 0)：目标 = -position_pct * strength * balance
+    入场 (signal_type=="entry"): 空仓时全量开仓。
+    离场 (signal_type=="exit"):  全平仓。
     """
 
     handles = frozenset({EventType.KLINE})
@@ -27,14 +25,14 @@ class PositionCalcHandler(Handler):
             return
 
         signal_value = row.get("signal_value", 0.0)
-        signal_strength = row.get("signal_strength", 0.0)
         signal_reason = row.get("signal_reason", "")
+        signal_type = row.get("signal_type", "entry")
 
         if signal_value == 0:
             return
 
         market = ctx.channel.market
-        bar_key = "1m" if "1m" in market.bars else next(iter(market.bars), None)
+        bar_key = next(iter(market.bars), None)
         if bar_key is None:
             return
         df = market.bars.get(bar_key)
@@ -50,34 +48,39 @@ class PositionCalcHandler(Handler):
         pos = acc.position
         pos.update_unrealized_pnl(price)
 
-        allocated = Decimal(str(acc.allocated_balance))
-        strength = Decimal(str(signal_strength))
-        leverage = Decimal(str(getattr(acc.leverage_config, "leverage", 1) or 1))
-        notional = allocated * strength * leverage
-        target_qty = notional / price
-
-        pos = acc.position
         if pos.side == "BUY":
             current_qty = Decimal(str(pos.qty))
+            current_side = 1
         elif pos.side == "SELL":
-            current_qty = -Decimal(str(pos.qty))
+            current_qty = Decimal(str(pos.qty))
+            current_side = -1
         else:
             current_qty = Decimal("0")
+            current_side = 0
 
-        target_signed = target_qty if signal_value > 0 else -target_qty
+        leverage = int(getattr(acc.leverage_config, "leverage", 1) or 1)
 
-        delta = target_signed - current_qty
-        if current_qty > 0 and delta < -current_qty:
-            delta = -current_qty
-        elif current_qty < 0 and delta > -current_qty:
-            delta = -current_qty
-        if abs(delta) < Decimal("0.000001"):
-            return
-
-        order_side = "BUY" if delta > 0 else "SELL"
-        order_qty = abs(delta)
-        order_notional = order_qty * price
-        margin = order_notional / leverage if leverage > 0 else order_notional
+        if signal_type == "exit":
+            if current_side == 0:
+                return
+            exit_fraction = float(row.get("exit_fraction", 1.0))
+            order_side = "SELL" if current_side > 0 else "BUY"
+            order_qty = current_qty * Decimal(str(exit_fraction))
+            if order_qty <= Decimal("0.000001"):
+                return
+            order_notional = order_qty * price
+            margin = Decimal("0")
+        else:
+            if current_side != 0:
+                return
+            allocated = Decimal(str(acc.allocated_balance))
+            notional = allocated * Decimal(str(leverage))
+            order_qty = notional / price
+            if order_qty <= Decimal("0.000001"):
+                return
+            order_side = "BUY" if signal_value > 0 else "SELL"
+            order_notional = order_qty * price
+            margin = order_notional / leverage
 
         await ctx.pipeline.write(Command(
             CommandType.CREATE_ORDER, ctx.channel.symbol.symbol,
@@ -85,7 +88,7 @@ class PositionCalcHandler(Handler):
                 "side": order_side,
                 "amount": float(order_qty),
                 "notional": float(order_notional),
-                "leverage": int(leverage),
+                "leverage": leverage,
                 "margin": float(margin),
                 "reason": signal_reason,
                 "close_price": float(price),
