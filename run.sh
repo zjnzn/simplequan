@@ -22,7 +22,11 @@ fi
 # 虚拟环境一次性初始化
 if [ ! -d "$VENV_DIR" ]; then
     echo "创建虚拟环境 ..."
-    "$PYTHON" -m venv "$VENV_DIR"
+    if ! "$PYTHON" -m venv "$VENV_DIR" 2>/dev/null; then
+        echo "失败，尝试安装 python3-venv ..."
+        apt-get update -qq && apt-get install -y -qq python3-venv
+        "$PYTHON" -m venv "$VENV_DIR"
+    fi
     echo "安装依赖 ..."
     "$VENV_DIR/bin/pip" install --quiet -r "$APP_DIR/requirements.txt"
     echo "环境就绪"
