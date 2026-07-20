@@ -1,3 +1,10 @@
-*.md
 *.pyc
-*log
+__pycache__/
+.venv/
+logs/
+.pid
+*.log
+.DS_Store
+.vscode/
+*.md
+*.log

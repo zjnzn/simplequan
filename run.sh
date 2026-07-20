@@ -4,6 +4,7 @@ set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="simplequan"
 PID_FILE="$APP_DIR/.pid"
+VENV_DIR="$APP_DIR/.venv"
 
 # 自动检测 Python 解释器（优先 python3 → python）
 PYTHON=""
@@ -17,7 +18,16 @@ if [ -z "$PYTHON" ]; then
     echo "FATAL: 找不到 python3 或 python"
     exit 1
 fi
-echo "使用解释器: $PYTHON ($($PYTHON --version 2>&1))"
+
+# 虚拟环境一次性初始化
+if [ ! -d "$VENV_DIR" ]; then
+    echo "创建虚拟环境 ..."
+    "$PYTHON" -m venv "$VENV_DIR"
+    echo "安装依赖 ..."
+    "$VENV_DIR/bin/pip" install --quiet -r "$APP_DIR/requirements.txt"
+    echo "环境就绪"
+fi
+PYTHON="$VENV_DIR/bin/python"
 LOG_DIR="$APP_DIR/logs"
 LOG_FILE="$LOG_DIR/${APP_NAME}_$(date +%Y%m%d).log"
 
