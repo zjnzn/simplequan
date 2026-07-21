@@ -40,7 +40,7 @@ class SymbolChannel:
     """Netty 风格 Channel。只认 EventBus，不持有任何交易所连接。
 
     持有运行时状态：market（MarketState，K线/指标/信号）、sub_account（Channel 维度子账号）、
-    cache（订单缓存）、bootstrap（跨Channel查询门）。handler 通过 ctx.channel.* 访问。
+    cache（订单缓存）。handler 通过 ctx.channel.* 访问。
     """
 
     def __init__(
@@ -61,7 +61,7 @@ class SymbolChannel:
         self.market = MarketState()          # 运行时市场状态
         self.sub_account = sub_account
         self.cache = MemoryCache()           # Channel 维度缓存（订单等）
-        self.bootstrap = None                # Bootstrap 注入，跨TF门控查询
+        self.bootstrap = None               # Bootstrap 后置注入，Handler 通过 ctx.channel 直达
 
         self._activated = False
         self._subscribed: set[str] = set()

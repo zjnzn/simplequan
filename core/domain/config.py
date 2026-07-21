@@ -35,19 +35,12 @@ class StrategyDef:
 
 
 @dataclass(frozen=True, slots=True)
-class GateConfig:
-    """跨TF门控配置 — 低TF策略从高TF channel提取市场状态做方向过滤。"""
-    interval: str                            # 高TF周期，如 "1h"
-    columns: list[str] = field(default_factory=lambda: ["market_state", "dmi_dir", "adx", "signal_value"])
-
-
-@dataclass(frozen=True, slots=True)
 class StrategyConfig:
     """策略配置（含策略参数与所需指标）。"""
     name: str
     params: dict[str, Any] = field(default_factory=dict)
     indicators: list[IndicatorConfig] = field(default_factory=list)
-    gate: GateConfig | None = None
+    gate: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,18 +127,11 @@ def _parse_indicator(raw: dict[str, Any]) -> IndicatorConfig:
 
 
 def _parse_strategy(raw: dict[str, Any]) -> StrategyConfig:
-    gate = None
-    if "gate" in raw:
-        g = raw["gate"]
-        gate = GateConfig(
-            interval=g["interval"],
-            columns=g.get("columns", ["market_state", "dmi_dir", "adx", "signal_value"]),
-        )
     return StrategyConfig(
         name=raw["name"],
         params=raw.get("params", {}),
         indicators=[_parse_indicator(i) for i in raw.get("indicators", [])],
-        gate=gate,
+        gate=raw.get("gate"),
     )
 
 

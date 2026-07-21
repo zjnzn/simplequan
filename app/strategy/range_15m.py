@@ -1,25 +1,15 @@
-"""震荡策略 15m — span+bb+vol_ratio 3指标投票 + 跨TF趋势门控 + PartTP=0.3%.
-
-指标研究驱动:
-  span: 自适应波动标准化, zero-lag, 跨时间稳定
-  bb_pct_b: 布林带位置, 均值回归锚点
-  vol_ratio: 成交量比率, 放量确认
+"""震荡策略 15m — span+bb+vol_ratio 3指标投票 + PartTP=0.3% + Fixed SL=2%.
 
 Vote设计 (跨类别: 波动率+波动率+成交量):
   Vote1 — span 自适应偏离: |span|>th → 极端偏离→反转
   Vote2 — bb_pct_b 均值回归: bb<low→long, bb>high→short
   Vote3 — vol_ratio 放量确认: vol>th + span同向→确认
   min_votes=2
-
-跨TF门控 (gate_data):
-  h1 strong_trend/moderate_trend + |dmi_dir| > GATE_DMI_TH → 仅允许顺势信号
-  h1 range/weak_trend → 无方向限制（原始震荡逻辑）
 """
 import numpy as np
 
 
-def _vote_range_span(df, idx: np.ndarray, span_th: float, bb_low: float,
-                     bb_high: float, vol_th: float, min_votes: int) -> np.ndarray:
+def _vote_range_span(df, idx, span_th, bb_low, bb_high, vol_th, min_votes):
     sp = df["span"].values[idx]
     bb = df["bb_pct_b"].values[idx]
     vr = df["vol_ratio"].values[idx]
@@ -44,8 +34,8 @@ class Range15mStrategy:
 
     name = "range_15m"
     version = "2.0.0"
-
     tf = "15m"
+
     FIXED_SL = 0.02
     PARTIAL_TP = 0.003
     MAX_HOLD = 24
@@ -60,31 +50,13 @@ class Range15mStrategy:
     MIN_VOTES = 2
     DMI_THRESHOLD = 0.08
 
-    # 跨TF门控参数
-    GATE_DMI_TH = 0.05          # h1 |dmi_dir| 超过此值才视为有明确趋势方向
-    GATE_STATES = {"strong_trend", "moderate_trend"}
-
     def __init__(self):
         self._partial_done = False
 
     def required_indicators(self, params: dict) -> list[str]:
         return ["dmi_dir", "span", "bb_pct_b", "vol_ratio", "atr_vol"]
 
-    def _apply_trend_gate(self, signal: np.ndarray, gate_data: dict) -> np.ndarray:
-        """根据高TF趋势方向过滤反向信号（向量化，但实际只影响最后一bar）。"""
-        state = gate_data.get("market_state", "range")
-        if state not in self.GATE_STATES:
-            return signal
-        dmi = gate_data.get("dmi_dir", 0.0)
-        if abs(dmi) < self.GATE_DMI_TH:
-            return signal
-        n = len(signal)
-        gated = signal.copy()
-        gated[(gated > 0) & (np.full(n, dmi < 0))] = 0
-        gated[(gated < 0) & (np.full(n, dmi > 0))] = 0
-        return gated
-
-    def route(self, df, params: dict | None = None, gate_data: dict | None = None) -> "np.ndarray":
+    def route(self, df, params: dict | None = None) -> np.ndarray:
         n = len(df)
         signal = np.zeros(n, dtype=float)
 
@@ -106,10 +78,6 @@ class Range15mStrategy:
             vol_th=self.VOL_TH,
             min_votes=self.MIN_VOTES,
         )
-
-        if gate_data:
-            signal = self._apply_trend_gate(signal, gate_data)
-
         return signal
 
     async def check_exit(self, row: dict, pos: dict, ctx, params: dict) -> str | None:

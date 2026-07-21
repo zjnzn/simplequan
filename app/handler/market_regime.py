@@ -1,14 +1,14 @@
-"""MarketRegimeHandler — ADX市场状态分类 + DMI方向过滤。
+"""MarketRegimeHandler — ADX市场状态分类 + DMI方向过滤.
 
-依赖: df 中已存在 adx, dmi_dir 列 (由前置 DataProcess 计算)。
+依赖: df 中已存在 adx, dmi_dir 列 (由前置 DataProcess 计算).
 产出: market_state (strong_trend/moderate_trend/weak_trend/range)
       range_allowed (bool, DMI中性时震荡策略可交易)
+
+使用 expanding 百分位排名进行动态分类, 避免固定阈值在加密市场 ADX 偏高时丢失区分度.
 """
 from __future__ import annotations
 
 import logging
-
-import numpy as np
 
 from core.domain.event import Event, EventType
 from core.ports.context import Context
@@ -18,16 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class MarketRegimeHandler(Handler):
-    """入站：计算市场状态列 → 追加到 df 和 row dict。
-
-    ADX阈值 (归一化):
-      strong_trend:   ADX > 0.5  (>25)
-      moderate_trend: ADX 0.4-0.5 (20-25)
-      weak_trend:     ADX 0.3-0.4 (15-20)
-      range:          ADX ≤ 0.3  (<15)
-
-    DMI方向过滤: |dmi_dir| < threshold → range_allowed=True
-    """
+    """入站: 计算 market_state / range_allowed → 追加到 df 和 row dict."""
 
     handles = frozenset({EventType.KLINE})
 
@@ -36,21 +27,26 @@ class MarketRegimeHandler(Handler):
         self._dmi_threshold = dmi_threshold
 
     def _classify(self, df):
-        """对整个 df 计算 market_state 和 range_allowed 最新值。
+        """expanding 百分位排名动态分类.
 
-        对齐 cl add_market_state: 当 adx_smooth > 1 时，用平滑后的值覆盖
-        df["adx"]（策略 route 依赖 df["adx"] 做入场过滤）。
+        strong_trend:   rank > 0.70  (top 30%)
+        moderate_trend: rank 0.40-0.70
+        weak_trend:     rank 0.20-0.40
+        range:          rank ≤ 0.20  (bottom 20%)
         """
+        import numpy as np
+
         adx = df["adx"]
         if self._adx_smooth > 1:
             adx = adx.ewm(span=self._adx_smooth, adjust=False).mean()
-            df["adx"] = adx  # 对齐 cl: 覆盖为平滑值
+            df["adx"] = adx
 
-        adx_v = adx.values
+        rank = adx.expanding(min_periods=100).rank(pct=True)
+        rv = rank.values
         conditions = [
-            adx_v > 0.5,
-            (adx_v > 0.4) & (adx_v <= 0.5),
-            (adx_v > 0.3) & (adx_v <= 0.4),
+            rv > 0.70,
+            (rv > 0.40) & (rv <= 0.70),
+            (rv > 0.20) & (rv <= 0.40),
         ]
         choices = ["strong_trend", "moderate_trend", "weak_trend"]
         market_state = np.select(conditions, choices, default="range")
@@ -78,7 +74,6 @@ class MarketRegimeHandler(Handler):
 
         state, allowed = self._classify(df)
 
-        # 回写到 df
         idx = df.index[-1]
         df.loc[idx, "market_state"] = state
         df.loc[idx, "range_allowed"] = bool(allowed)
