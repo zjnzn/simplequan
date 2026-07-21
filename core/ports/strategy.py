@@ -16,8 +16,12 @@ class Strategy(Protocol):
         """根据 params 返回该策略依赖的指标 key 列表。"""
         ...
 
-    def route(self, df: pd.DataFrame, params: dict) -> np.ndarray:
-        """输入完整 df，输出全量信号向量 (1=long, -1=short, 0=flat)。"""
+    def route(self, df: pd.DataFrame, params: dict, gate_data: dict[str, Any] | None = None) -> np.ndarray:
+        """输入完整 df，输出全量信号向量 (1=long, -1=short, 0=flat)。
+
+        gate_data: 跨TF门控数据，由框架根据 ChannelConfig.gate 注入高TF最新状态。
+        策略忽略未知 kwargs 即可保证向后兼容。
+        """
         ...
 
     async def check_exit(self, row: dict[str, Any], pos: dict[str, Any],

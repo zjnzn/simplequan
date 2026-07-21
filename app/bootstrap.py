@@ -78,6 +78,13 @@ class Bootstrap:
             self._master_ready = asyncio.get_running_loop().create_future()
         return await self._master_ready
 
+    def get_channel_by_symbol_interval(self, symbol: str, interval: str) -> SymbolChannel | None:
+        """跨TF查找：按 symbol + interval 定位另一个 channel（用于门控）。"""
+        for ch in self._channels.values():
+            if ch.symbol.symbol == symbol and ch.config.interval == interval:
+                return ch
+        return None
+
     def bind(self) -> Bootstrap:
         """订阅 connector 回报 topic。"""
         self._bus.on("account/master", self._on_master)
@@ -151,6 +158,7 @@ class Bootstrap:
             self._bus, cfg, symbol, cfg.market,
             pipeline=None, sub_account=sub,
         )
+        ch.bootstrap = self  # 注入 Bootstrap 引用，供跨TF门控查询
         # 3. 建 pipeline 绑定 channel，再回填
         pipeline = ChannelPipeline(ch)
         ch.pipeline = pipeline

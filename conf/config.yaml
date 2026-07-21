@@ -64,6 +64,9 @@ channel:
         strategy:
           name: range_15m
           params: {}
+          gate:
+            interval: "1h"
+            columns: ["market_state", "dmi_dir", "adx", "signal_value"]
           indicators:
             - name: dmi
               params: { period: 14 }

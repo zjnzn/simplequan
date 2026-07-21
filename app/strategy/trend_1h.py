@@ -56,7 +56,7 @@ class Trend1hStrategy:
             "pm_momentum", "dc_breakout", "ac_smooth", "atr_vol",
         ]
 
-    def route(self, df, params: dict | None = None) -> "np.ndarray":
+    def route(self, df, params: dict | None = None, gate_data: dict | None = None) -> "np.ndarray":
         """全量向量化信号 — 按 market_state 分派子策略投票 + ADX/autocorr 过滤."""
         state = df["market_state"].values
         signal = np.zeros(len(df), dtype=float)
