@@ -9,8 +9,8 @@ from __future__ import annotations
 import csv
 import logging
 import os
+import threading
 import time as _time
-from asyncio import Lock
 from dataclasses import asdict
 from datetime import datetime, timezone
 
@@ -37,28 +37,29 @@ def _flatten_order(order: Order) -> dict:
     return d
 
 
+def _ensure_row(row: dict) -> None:
+    if "timestamp" in row and "datetime" not in row:
+        try:
+            row["datetime"] = _dt(int(row["timestamp"]))
+        except (TypeError, ValueError):
+            pass
+
+
 class DataPersistHandler(Handler):
     """全链路持久化：K 线 + 订单 + 出站指令。
 
-    位置：Signal 之后、RiskPre 之前。捕获完整 enriched K 线
-    （指标+市场状态+信号），以及所有订单事件和出站指令。
-    handles 留空 = 拦截全部入站事件类型。
+    位置：Signal 之后、RiskPre 之前。
     """
 
     handles: frozenset = frozenset()
     handles_commands: frozenset = frozenset()
 
     def __init__(self) -> None:
-        self._klines: dict[str, Lock] = {}
-        self._klines_fields: dict[str, list[str]] = {}
+        self._lock = threading.Lock()
         self._klines_last: dict[str, int] = {}
-
-        self._orders: dict[str, Lock] = {}
+        self._klines_fields: dict[str, list[str]] = {}
         self._orders_fields: dict[str, list[str]] = {}
-
-        self._commands: dict[str, Lock] = {}
         self._commands_fields: dict[str, list[str]] = {}
-
         os.makedirs(OUT_DIR, exist_ok=True)
 
     # ============================================================
@@ -75,7 +76,7 @@ class DataPersistHandler(Handler):
             ):
                 self._write_order(event)
         except Exception:
-            logger.debug("持久化异常", exc_info=True)
+            logger.warning("DataPersist 写入异常", exc_info=True)
         finally:
             await ctx.fire_channel_read(event)
 
@@ -87,26 +88,22 @@ class DataPersistHandler(Handler):
         if not interval:
             return
 
+        _ensure_row(row)
         compact = event.symbol.replace("/", "_")
         key = f"{compact}_{interval}"
         filepath = os.path.join(OUT_DIR, f"{key}.csv")
 
-        lock = self._klines.setdefault(key, Lock())
-        with lock:
+        with self._lock:
             ts = row.get("timestamp", 0)
-            if ts <= self._klines_last.get(key, 0):
+            last = self._klines_last.get(key, 0)
+            if ts and ts <= last:
                 return
-            self._klines_last[key] = ts
+            if ts:
+                self._klines_last[key] = ts
 
-            if "datetime" not in row and "timestamp" in row:
-                row["datetime"] = _dt(int(row["timestamp"]))
-
-            # 首次写入时固化字段顺序
             if key not in self._klines_fields:
                 self._klines_fields[key] = list(row.keys())
-
             fields = self._klines_fields[key]
-            # 如有新增字段追加
             for k in row:
                 if k not in fields:
                     fields.append(k)
@@ -123,8 +120,7 @@ class DataPersistHandler(Handler):
             row = _flatten_order(payload)
         elif isinstance(payload, dict):
             row = dict(payload)
-            if "timestamp" in row and "datetime" not in row:
-                row["datetime"] = _dt(int(row["timestamp"]))
+            _ensure_row(row)
         else:
             row = {"raw": str(payload)}
 
@@ -134,9 +130,8 @@ class DataPersistHandler(Handler):
         compact = event.symbol.replace("/", "_")
         key = f"order_{compact}"
         filepath = os.path.join(OUT_DIR, f"{compact}_orders.csv")
-        lock = self._orders.setdefault(key, Lock())
 
-        with lock:
+        with self._lock:
             if key not in self._orders_fields:
                 self._orders_fields[key] = list(row.keys())
             fields = self._orders_fields[key]
@@ -159,7 +154,6 @@ class DataPersistHandler(Handler):
             compact = command.symbol.replace("/", "_")
             key = f"cmd_{compact}"
             filepath = os.path.join(OUT_DIR, f"{compact}_commands.csv")
-            lock = self._commands.setdefault(key, Lock())
 
             row = {
                 "timestamp": int(_time.time() * 1000),
@@ -169,7 +163,7 @@ class DataPersistHandler(Handler):
                 **command.payload,
             }
 
-            with lock:
+            with self._lock:
                 if key not in self._commands_fields:
                     self._commands_fields[key] = list(row.keys())
                 fields = self._commands_fields[key]
@@ -183,6 +177,6 @@ class DataPersistHandler(Handler):
                         writer.writeheader()
                     writer.writerow(row)
         except Exception:
-            logger.debug("指令持久化异常", exc_info=True)
+            logger.warning("DataPersist 指令写入异常", exc_info=True)
         finally:
             await ctx.write(command)
