@@ -5,6 +5,7 @@ from app.eventbus.eventbus import ChannelEventBus
 from app.exchange.ccxt_exchange import CcxtExchange
 from app.exchange.connector import ExchangeConnector
 from app.handler.data_parse import DataParseHandler
+from app.handler.data_persist import DataPersistHandler
 from app.handler.data_process import DataProcessHandler
 from app.handler.market_regime import MarketRegimeHandler
 from app.handler.order_accepted import OrderAcceptedHandler
@@ -70,6 +71,7 @@ class TradingChannelInitializer(ChannelInitializer):
         pipeline.add_last("DataProcess", DataProcessHandler(self._indicator_registry))
         pipeline.add_last("MarketRegime", MarketRegimeHandler())
         pipeline.add_last("Signal", SignalHandler(self._strategy_registry))
+        pipeline.add_last("DataPersist", DataPersistHandler())
         pipeline.add_last("RiskPre", RiskPreCheckHandler(build_default_pre_pipeline()))
         pipeline.add_last("PositionCalc", PositionCalcHandler())
         pipeline.add_last("RiskPost", RiskPostCheckHandler(build_default_post_pipeline()))
