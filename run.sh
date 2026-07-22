@@ -97,8 +97,14 @@ restart() {
 }
 
 tailf() {
-    echo "tail -f $LOG_FILE (Ctrl+C 退出)"
-    tail -f "$LOG_FILE"
+    local latest
+    latest=$(ls -t "$LOG_DIR/${APP_NAME}_"*.log 2>/dev/null | head -1)
+    if [ -z "$latest" ]; then
+        echo "没有找到日志文件"
+        return 1
+    fi
+    echo "tail -f $latest (Ctrl+C 退出)"
+    tail -f "$latest"
 }
 
 # 日志清理: 保留最近 30 天
