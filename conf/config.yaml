@@ -44,7 +44,14 @@ channel:
       1h:
         strategy:
           name: trend_1h
-          params: {}
+          params:
+            FIXED_SL: 0.015
+            TRAIL_MULT: 0.3
+            ADX_FLOOR: 0.10
+            MIN_HOLD: 3
+            COOLDOWN: 1
+            ac_floor: 0.0
+            ADX_WARNING: 0.0
           indicators:
             - name: dmi
               params: { period: 14 }

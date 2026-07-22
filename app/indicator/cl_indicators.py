@@ -24,7 +24,7 @@ def _add_dmi(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
     adx = dx.ewm(alpha=1.0 / period, adjust=False).mean()
     df = df.copy()
     df["dmi_dir"] = np.clip(diff / 100.0, -1.0, 1.0)
-    df["dmi_trend"] = np.clip(adx / 50.0, 0.0, 1.0)
+    df["dmi_trend"] = np.clip(adx / 100.0, 0.0, 1.0)
     return df
 
 
@@ -42,7 +42,7 @@ def _add_adx(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
     dx = 100.0 * abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)
     adx = dx.ewm(alpha=1.0 / period, adjust=False).mean()
     df = df.copy()
-    df["adx"] = np.clip(adx / 50.0, 0.0, 1.0)
+    df["adx"] = np.clip(adx / 100.0, 0.0, 1.0)
     return df
 
 
