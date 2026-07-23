@@ -7,6 +7,7 @@ K 线 + 指标 + 市场状态 + 信号 → {symbol}_{interval}.csv
 from __future__ import annotations
 
 import csv
+import json
 import logging
 import os
 import threading
@@ -26,23 +27,41 @@ OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "runtime")
 
 
 def _dt(ts_ms: int) -> str:
-    return datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        return datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, OSError, ValueError):
+        return ""
+
+
+def _safe_value(v) -> str | int | float | None:
+    """嵌套结构 JSON 序列化，避免 CSV 列内逗号炸开。"""
+    if v is None:
+        return ""
+    if isinstance(v, (int, float, str, bool)):
+        return v
+    if isinstance(v, dict):
+        return json.dumps(v, ensure_ascii=False, default=str)
+    if isinstance(v, (list, tuple)):
+        return json.dumps(v, ensure_ascii=False, default=str)
+    return str(v)
+
+
+def _flatten_row(row: dict) -> dict:
+    """将 dict 中所有嵌套值转安全字符串，datetime 补充。"""
+    flat = {}
+    for k, v in row.items():
+        flat[k] = _safe_value(v)
+    if "timestamp" in flat and "datetime" not in flat:
+        flat["datetime"] = _dt(int(flat["timestamp"])) if isinstance(flat["timestamp"], (int, float)) else ""
+    return flat
 
 
 def _flatten_order(order: Order) -> dict:
     d = asdict(order)
     if d.get("updates"):
-        d["updates"] = str(d["updates"])
+        d["updates"] = json.dumps(d["updates"], default=str)
     d["datetime"] = _dt(int(d.get("timestamp", 0))) if d.get("timestamp") else ""
     return d
-
-
-def _ensure_row(row: dict) -> None:
-    if "timestamp" in row and "datetime" not in row:
-        try:
-            row["datetime"] = _dt(int(row["timestamp"]))
-        except (TypeError, ValueError):
-            pass
 
 
 class DataPersistHandler(Handler):
@@ -60,6 +79,7 @@ class DataPersistHandler(Handler):
         self._klines_fields: dict[str, list[str]] = {}
         self._orders_fields: dict[str, list[str]] = {}
         self._commands_fields: dict[str, list[str]] = {}
+        self._orders_dedup: set[str] = set()
         os.makedirs(OUT_DIR, exist_ok=True)
 
     # ============================================================
@@ -88,15 +108,14 @@ class DataPersistHandler(Handler):
         if not interval:
             return
 
-        _ensure_row(row)
+        row = _flatten_row(row)
         compact = event.symbol.replace("/", "_")
         key = f"{compact}_{interval}"
         filepath = os.path.join(OUT_DIR, f"{key}.csv")
 
         with self._lock:
             ts = row.get("timestamp", 0)
-            last = self._klines_last.get(key, 0)
-            if ts and ts <= last:
+            if ts and ts <= self._klines_last.get(key, 0):
                 return
             if ts:
                 self._klines_last[key] = ts
@@ -108,24 +127,32 @@ class DataPersistHandler(Handler):
                 if k not in fields:
                     fields.append(k)
 
-            with open(filepath, "a", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
-                if f.tell() == 0:
-                    writer.writeheader()
-                writer.writerow(row)
+            self._write_csv_row(filepath, fields, row)
 
     def _write_order(self, event: Event) -> None:
         payload = event.payload
+
+        # 统一转为扁平 dict
         if isinstance(payload, Order):
             row = _flatten_order(payload)
         elif isinstance(payload, dict):
             row = dict(payload)
-            _ensure_row(row)
         else:
-            row = {"raw": str(payload)}
+            row = {"raw": _safe_value(payload)}
 
         row["event_type"] = event.type.value
         row["symbol"] = event.symbol
+
+        # 扁平化嵌套字段
+        row = _flatten_row(row)
+
+        # 去重：同 order_id + event_type 只记一次
+        oid = row.get("id") or row.get("order_id") or row.get("orderId") or ""
+        dedup_key = f"{oid}_{event.type.value}"
+        if oid and dedup_key in self._orders_dedup:
+            return
+        if oid:
+            self._orders_dedup.add(dedup_key)
 
         compact = event.symbol.replace("/", "_")
         key = f"order_{compact}"
@@ -139,11 +166,7 @@ class DataPersistHandler(Handler):
                 if k not in fields:
                     fields.append(k)
 
-            with open(filepath, "a", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
-                if f.tell() == 0:
-                    writer.writeheader()
-                writer.writerow(row)
+            self._write_csv_row(filepath, fields, row)
 
     # ============================================================
     # 出站
@@ -160,8 +183,9 @@ class DataPersistHandler(Handler):
                 "datetime": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                 "command_type": command.type.value,
                 "symbol": command.symbol,
-                **command.payload,
             }
+            for k, v in command.payload.items():
+                row[k] = _safe_value(v)
 
             with self._lock:
                 if key not in self._commands_fields:
@@ -171,12 +195,16 @@ class DataPersistHandler(Handler):
                     if k not in fields:
                         fields.append(k)
 
-                with open(filepath, "a", newline="") as f:
-                    writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
-                    if f.tell() == 0:
-                        writer.writeheader()
-                    writer.writerow(row)
+                self._write_csv_row(filepath, fields, row)
         except Exception:
             logger.warning("DataPersist 指令写入异常", exc_info=True)
         finally:
             await ctx.write(command)
+
+    @staticmethod
+    def _write_csv_row(filepath: str, fields: list[str], row: dict) -> None:
+        with open(filepath, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+            if f.tell() == 0:
+                writer.writeheader()
+            writer.writerow(row)
